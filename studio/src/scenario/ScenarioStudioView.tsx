@@ -132,7 +132,7 @@ function shownState(state: ScenarioStepState | undefined, pending: boolean | und
   const status = deliverableState(state);
   return pending && status === 'waiting' ? 'making' : status;
 }
-const stateLabels: Record<DeliverableState, string> = { waiting: 'Not started', making: 'In the making', ready: 'Ready', failed: 'Needs a retry', skipped: 'Not this time' };
+const stateLabels: Record<DeliverableState, string> = { waiting: 'Not started', making: 'In the making', ready: 'Finished', failed: 'Needs a retry', skipped: 'Not this time' };
 
 /** Status to restore when a deliverable is chosen again: keep a finished output, otherwise start over. */
 export const restoredStatus = (state: ScenarioStepState | undefined): ScenarioStepState['status'] =>
@@ -326,18 +326,29 @@ export function ScenarioStudioView({
   }, [fieldIds, run?.brief]);
 
   /** Saves typed fields; resolves false when the brief could not be saved. */
-  const flush = useCallback(async () => {
+  // One save at a time: a second save sent with the same revision would conflict.
+  // Fields typed while a save is in flight go out in the next round of the same save.
+  const pendingSave = useRef<Promise<boolean> | null>(null);
+  const flush = useCallback((): Promise<boolean> => {
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
-    if (!dirty.current.size) return true;
-    const patch = Object.fromEntries([...dirty.current].map(id => [id, latest.current[id] ?? '']));
-    try {
-      await api.mutate('studio-brief', 'update_brief', { brief: patch });
-      for (const id of Object.keys(patch)) if (latest.current[id] === patch[id]) dirty.current.delete(id);
-      return true;
-    } catch {
-      // useScenarioRun reports conflicts; the typed values stay so nothing is lost.
-      return false;
-    }
+    // Waiting on a save in flight still saves anything typed after its last round.
+    if (pendingSave.current) return pendingSave.current.then(ok => (ok && dirty.current.size ? flushRef.current() : ok));
+    if (!dirty.current.size) return Promise.resolve(true);
+    const save = async () => {
+      try {
+        while (dirty.current.size) {
+          const patch = Object.fromEntries([...dirty.current].map(id => [id, latest.current[id] ?? '']));
+          await api.mutate('studio-brief', 'update_brief', { brief: patch });
+          for (const id of Object.keys(patch)) if (latest.current[id] === patch[id]) dirty.current.delete(id);
+        }
+        return true;
+      } catch {
+        // useScenarioRun reports conflicts; the typed values stay so nothing is lost.
+        return false;
+      }
+    };
+    pendingSave.current = save().finally(() => { pendingSave.current = null; });
+    return pendingSave.current;
   }, [api]);
 
   const flushRef = useRef(flush);
@@ -839,7 +850,7 @@ export function ScenarioStudioView({
             setPreviewItem(null);
             if (item.ref.type === 'design') onOpenDesignProject(item.ref.projectId);
             else if (item.ref.type === 'motion') void onOpenMotionProject(item.ref.projectId);
-            else if (item.ref.type === 'asset') window.open(`/?page=assets&asset=${encodeURIComponent(item.ref.assetId)}`, '_blank', 'noopener,noreferrer');
+            else if (item.ref.type === 'asset') window.open(`/assets/${encodeURIComponent(item.ref.assetId)}?version=${encodeURIComponent(item.ref.versionId)}`, '_blank', 'noopener,noreferrer');
           }} />
         <Button variant="plain" size="sm" className="om-studio-workflow-link" icon={<RemixIcon name="route-line" size={14} />} onClick={() => void leaveAfterSave(onSwitchToManual)}>
           {t('Fine-tune each step')}

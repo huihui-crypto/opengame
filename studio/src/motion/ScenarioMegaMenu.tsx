@@ -77,7 +77,7 @@ export function ScenarioMegaMenu({
         <h2>{t('Workflows')}</h2>
         <span>{t('One brief in, a full kit out')}</span>
       </div>
-      <div className="om-studio-mega-scenes" role="tablist" aria-label={t('Scenes')}>
+      <div className="om-studio-mega-scenes" role="tablist" aria-label={t('Workflow scenes')}>
         {studioScenes.map(item => (
           <Button
             key={item.id}
