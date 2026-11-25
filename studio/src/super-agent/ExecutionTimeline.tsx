@@ -1447,7 +1447,7 @@ export function ExecutionTimeline({
   onOpenAccountSettings?: () => void;
   onTriggerActionCard?: (card: SuperAgentActionCard) => void;
   onResumeAfterAccount?: AccountHandoffResume;
-  onOpenActionCardSettings?: (card: SuperAgentActionCard) => void;
+  onOpenActionCardSettings?: (card: SuperAgentActionCard, target: 'account' | 'api_key') => void;
   onOpenInDesignStudio?: (projectId: string) => void;
   onOpenInMotionStudio?: (projectId: string) => void;
   onOpenInAssets?: (assetId: string, versionId?: string) => void;
@@ -1789,7 +1789,7 @@ function TurnActionCard({
   card: SuperAgentActionCard;
   onTrigger?: (card: SuperAgentActionCard) => void;
   onResume?: AccountHandoffResume;
-  onOpenSettings?: (card: SuperAgentActionCard) => void;
+  onOpenSettings?: (card: SuperAgentActionCard, target: 'account' | 'api_key') => void;
 }) {
   const { t } = useI18n();
   const descriptionId = useId();

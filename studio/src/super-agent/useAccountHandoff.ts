@@ -10,6 +10,23 @@ export type AccountHandoffResume = (card: SuperAgentActionCard, account: { plan?
 const LOGIN_TIMEOUT = 5 * 60_000;
 const UPGRADE_TIMEOUT = 20 * 60_000;
 
+// The conversation stream unmounts while the preview is expanded. In-flight handoffs live here, keyed by card,
+// so a remounted card picks up its polling and deadline instead of falling back to idle; resumes stay once per card.
+type HandoffSession = { state: AccountHandoffState; entryId: string; deadline: number };
+const sessions = new Map<string, HandoffSession>();
+const resumedCards = new Set<string>();
+/** Test-only: forget in-flight handoffs and resumed cards. */
+export function resetAccountHandoffSessions() { sessions.clear(); resumedCards.clear(); }
+function restoredState(state: AccountHandoffState): AccountHandoffState | undefined {
+  switch (state.status) {
+    case 'authorizing': case 'awaiting_upgrade': case 'failed': return state;
+    // The login POST is idempotent and its result is read by polling; plans were already requested.
+    case 'starting': case 'signed_in': return { status: 'authorizing' };
+    case 'opening_plan': return { status: 'awaiting_upgrade' };
+    default: return undefined;
+  }
+}
+
 export function useAccountHandoff(card: SuperAgentActionCard, onResume?: AccountHandoffResume) {
   const [state, setState] = useState<AccountHandoffState>({ status: 'idle' });
   const [alreadySignedIn, setAlreadySignedIn] = useState(false);
@@ -18,7 +35,9 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
   const generation = useRef(0);
   const entryId = useRef('');
   const deadline = useRef(0);
-  const resumed = useRef(new Set<string>());
+  const resumed = useRef(resumedCards);
+  const cardId = useRef(card.id);
+  cardId.current = card.id;
   const resume = useRef(onResume);
   resume.current = onResume;
   const polling = useRef<object | null>(null);
@@ -28,6 +47,8 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     if (!mounted.current) return;
     current.current = next;
     setState(next);
+    if (restoredState(next)) sessions.set(cardId.current, { state: next, entryId: entryId.current, deadline: deadline.current });
+    else sessions.delete(cardId.current);
   }, []);
   const isCurrent = useCallback((run: number) => mounted.current && generation.current === run, []);
   // Right after sign-in the connector may report signed-in before its first billing read lands (no plan yet).
@@ -45,6 +66,15 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
   useEffect(() => {
     mounted.current = true;
     const run = ++generation.current;
+    const saved = sessions.get(card.id);
+    const restored = saved && restoredState(saved.state);
+    if (saved && restored) {
+      entryId.current = saved.entryId;
+      deadline.current = saved.deadline;
+      current.current = restored;
+      setState(restored);
+      return () => { mounted.current = false; generation.current++; };
+    }
     current.current = { status: 'idle' };
     setState(current.current);
     setAlreadySignedIn(false);

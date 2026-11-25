@@ -397,7 +397,7 @@ export function ConversationStream({
   onOpenAccountSettings?: () => void;
   onTriggerActionCard?: (card: SuperAgentActionCard) => void;
   onResumeAfterAccount?: AccountHandoffResume;
-  onOpenActionCardSettings?: (card: SuperAgentActionCard) => void;
+  onOpenActionCardSettings?: (card: SuperAgentActionCard, target: 'account' | 'api_key') => void;
   onOpenInDesignStudio?: (projectId: string) => void;
   onOpenInMotionStudio?: (projectId: string) => void;
   onOpenInAssets?: (assetId: string, versionId?: string) => void;

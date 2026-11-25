@@ -8,7 +8,7 @@ import { useAccountHandoff, type AccountHandoffResume } from './useAccountHandof
 export function AccountHandoffCard({ card, onResume, onOpenSettings }: {
   card: SuperAgentActionCard;
   onResume?: AccountHandoffResume;
-  onOpenSettings?: (card: SuperAgentActionCard) => void;
+  onOpenSettings?: (card: SuperAgentActionCard, target: 'account' | 'api_key') => void;
 }) {
   const { t } = useI18n();
   const descriptionId = useId();
@@ -109,7 +109,7 @@ export function AccountHandoffCard({ card, onResume, onOpenSettings }: {
         </Button>
       )}
       {secondary === 'settings' && onOpenSettings && (
-        <Button variant="plain" type="button" className="om-sa-deliverable-btn om-sa-action-card-btn" onClick={() => onOpenSettings(card)}>
+        <Button variant="plain" type="button" className="om-sa-deliverable-btn om-sa-action-card-btn" onClick={() => onOpenSettings(card, state.status === 'failed' ? 'account' : 'api_key')}>
           {t(state.status === 'failed' ? 'Open account settings' : 'Use my own API key')}
         </Button>
       )}

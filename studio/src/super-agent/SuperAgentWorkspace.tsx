@@ -1054,6 +1054,7 @@ export function SuperAgentWorkspace({
     }
   };
 
+  const resumeRequestIds = useRef(new Map<string, string>());
   const handleSend = async (
     text: string,
     meta?: {
@@ -1065,15 +1066,17 @@ export function SuperAgentWorkspace({
       overrideAttachments?: SuperAgentResourceAttachment[];
       initialArtifact?: Partial<SuperAgentArtifact>;
       followUpBehavior?: SuperAgentFollowUpMode;
+      /** Reuse a caller-owned requestId so retries of the same logical send are deduplicated by the gateway. */
+      requestId?: string;
       /** Leave the composer's draft attachments untouched (system-initiated sends such as account resume). */
       keepDraftAttachments?: boolean;
     },
   ): Promise<boolean> => {
     setSending(true);
     try {
-      const requestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      const requestId = meta?.requestId ?? (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
-        : `sa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        : `sa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
       const outgoingAttachments = meta?.overrideAttachments ?? attachments;
       const turnPayload = {
         requestId,
@@ -1548,8 +1551,16 @@ export function SuperAgentWorkspace({
     }
   }, [handlePlayGame]);
 
-  const handleResumeAfterAccount = async (_card: SuperAgentActionCard, { plan }: { plan?: string }) => {
+  const handleResumeAfterAccount = async (card: SuperAgentActionCard, { plan }: { plan?: string }) => {
+    // One stable requestId per card: a retry after a lost response replays instead of enqueueing twice.
+    const key = `${activeChat?.id ?? ''}:${card.id}`;
+    let requestId = resumeRequestIds.current.get(key);
+    if (!requestId) {
+      requestId = `sa-resume-${typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Date.now().toString(36)}`;
+      resumeRequestIds.current.set(key, requestId);
+    }
     const continued = await handleSend(t('Signed in — please continue.'), {
+      requestId,
       hiddenInstructions: 'The user just signed in to OpenDesign' + (plan ? ` (plan: ${plan})` : '')
         + '. Retry the media generation that was blocked by sign-in or plan in the previous turn, with the same brief and settings. Before any paid generation, still state the expected cost as the existing rules require; do not ask the user to reply again.',
       followUpBehavior: 'queue',
@@ -1559,7 +1570,13 @@ export function SuperAgentWorkspace({
     if (!continued) throw new Error(t('Could not continue the conversation. Try again.'));
   };
 
-  const handleOpenActionCardSettings = (card: SuperAgentActionCard) => {
+  const handleOpenActionCardSettings = (card: SuperAgentActionCard, target: 'account' | 'api_key') => {
+    if (target === 'api_key') {
+      // The account detail has no key form; open the provider list where a media provider key can be added.
+      if (onOpenProviderSettings) onOpenProviderSettings(undefined, card.entry);
+      else onOpenModelSettings?.();
+      return;
+    }
     if (onOpenProviderSettings) onOpenProviderSettings('account', card.entry);
     else onOpenAccountSettings?.();
   };

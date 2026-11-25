@@ -22,6 +22,7 @@ import { clearSuperAgentCache, peekCachedSuperAgentChat } from './superAgentClie
 import { designClient } from '../design/designClient';
 import { setClientCacheOverrideForTest } from '../utils/clientCacheMode';
 import { setFollowUpBehavior } from '../utils/superAgentPreferences';
+import { resetAccountHandoffSessions } from './useAccountHandoff';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -242,6 +243,7 @@ let originalFetch: typeof fetch;
 let originalEventSource: typeof EventSource | undefined;
 
 beforeEach(() => {
+  resetAccountHandoffSessions();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -463,7 +465,7 @@ it('keeps the account card retryable when continuing the conversation is rejecte
       { id: 'explain-block', role: 'assistant', text: 'Sign in to continue.', createdAt: 1003 },
     ],
   };
-  const turnBodies: Array<{ text: string; hiddenInstructions: string; attachments: unknown[] }> = [];
+  const turnBodies: Array<{ text: string; hiddenInstructions: string; attachments: unknown[]; requestId: string }> = [];
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -504,6 +506,8 @@ it('keeps the account card retryable when continuing the conversation is rejecte
   expect(turnBodies[1].hiddenInstructions).toContain('The user just signed in to OpenDesign (plan: plus)');
   // The automatic continuation never carries the composer's unsent draft attachments.
   expect(turnBodies[1].attachments).toEqual([]);
+  // A retry replays the same logical continuation, so the gateway can deduplicate it.
+  expect(turnBodies[1].requestId).toBe(turnBodies[0].requestId);
 });
 
 function getComposerEditor(rootEl: ParentNode = container): HTMLElement {

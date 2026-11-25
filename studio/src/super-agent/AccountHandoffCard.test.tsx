@@ -8,6 +8,7 @@ import { I18nProvider } from '../i18n/I18n';
 import { gatewayRequest } from '../motion/gatewayClient';
 import { notifyProvidersChanged } from '../motion/useProviderDirectory';
 import { AccountHandoffCard } from './AccountHandoffCard';
+import { resetAccountHandoffSessions } from './useAccountHandoff';
 
 vi.mock('../motion/gatewayClient', () => ({ gatewayRequest: vi.fn() }));
 vi.mock('../motion/useProviderDirectory', () => ({ notifyProvidersChanged: vi.fn() }));
@@ -29,6 +30,7 @@ const click = async (label: string) => { expect(button(label), label).toBeTruthy
 const tick = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 
 beforeEach(() => {
+  resetAccountHandoffSessions();
   vi.useFakeTimers();
   vi.clearAllMocks();
   account = { state: 'signed-out', consoleUrl: '' };
@@ -96,7 +98,7 @@ describe('AccountHandoffCard', () => {
     account = { state: 'signed-in', plan: kind === 'upgrade_go' ? 'go' : 'free', consoleUrl: '' };
     await render(target);
     await click('Use my own API key');
-    expect(onOpenSettings).toHaveBeenCalledWith(target);
+    expect(onOpenSettings).toHaveBeenCalledWith(target, 'api_key');
     await click('Upgrade to Plus');
     expect(status()).toBe('awaiting_upgrade');
     expect(request).not.toHaveBeenCalledWith('settings/account/login', expect.anything(), expect.anything());
@@ -128,6 +130,20 @@ describe('AccountHandoffCard', () => {
     expect(request).toHaveBeenCalledWith('settings/account?refresh=true');
     expect(status()).toBe('awaiting_upgrade');
     expect(onResume).not.toHaveBeenCalled();
+  });
+  it('keeps waiting for sign-in after the card unmounts and remounts (preview expanded)', async () => {
+    await render();
+    await click('Sign in & continue');
+    expect(status()).toBe('authorizing');
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render();
+    expect(status()).toBe('authorizing');
+    expect(container.textContent).toContain('Verification code');
+    account = { state: 'signed-in', plan: 'plus', consoleUrl: '' };
+    await tick(2_000);
+    expect(onResume).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls.filter(call => call[0] === 'settings/account/login')).toHaveLength(1);
   });
   it('times out sign-in, cancels the connector, and permits retry', async () => {
     await render();
@@ -326,7 +342,7 @@ describe('AccountHandoffCard', () => {
     await render();
     await click('Sign in & continue');
     await click('Open account settings');
-    expect(onOpenSettings).toHaveBeenCalledWith(card);
+    expect(onOpenSettings).toHaveBeenCalledWith(card, 'account');
     account = { ...account, state: 'signed-in', plan: 'free' };
     const original = request.getMockImplementation()!;
     request.mockImplementation((...args) => args[0] === 'settings/account/subscription' ? Promise.reject(new Error('offline')) : original(...args));
