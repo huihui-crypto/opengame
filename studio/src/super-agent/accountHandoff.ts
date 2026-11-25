@@ -1,6 +1,6 @@
 import type { AccountSummary } from '../../../shared/provider-directory';
 
-export type AccountHandoffFailure = 'timeout' | 'cancelled' | 'connector_unavailable' | 'start_failed' | 'plan_open_failed' | 'unknown';
+export type AccountHandoffFailure = 'timeout' | 'cancelled' | 'connector_unavailable' | 'start_failed' | 'plan_open_failed' | 'continue_failed' | 'unknown';
 export type AccountHandoffState =
   | { status: 'idle' | 'starting' | 'signed_in' | 'opening_plan' | 'done' }
   | { status: 'authorizing'; authorizationUrl?: string; userCode?: string; browserOpened?: boolean }
@@ -8,13 +8,10 @@ export type AccountHandoffState =
   | { status: 'resuming'; plan?: string }
   | { status: 'failed'; reason: AccountHandoffFailure; phase?: 'sign_in' | 'upgrade'; message?: string };
 
-/** Keep this advisory classification in sync with gateway/account-media.ts; enforcement stays in the gateway. */
-export function planMediaEntitlement(plan?: string): 'included' | 'not-included' | 'unknown' {
-  const normalized = plan?.trim().toLowerCase();
-  if (normalized === 'plus' || normalized === 'pro' || normalized === 'max') return 'included';
-  if (normalized === 'free' || normalized === 'go') return 'not-included';
-  return 'unknown';
-}
+import { planMediaEntitlement } from '../../../shared/account-plan';
+
+// Same classification as the gateway (shared/account-plan.ts); enforcement stays in the gateway.
+export { planMediaEntitlement };
 
 export function accountHandoffReducer(state: AccountHandoffState, summary: AccountSummary): AccountHandoffState {
   if (state.status === 'awaiting_upgrade' || (state.status === 'failed' && state.phase === 'upgrade')) {

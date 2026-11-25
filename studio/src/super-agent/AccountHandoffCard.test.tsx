@@ -250,6 +250,9 @@ describe('AccountHandoffCard', () => {
     expect(onResume).toHaveBeenCalledTimes(1);
     expect(status()).toBe('failed');
     expect(container.textContent).toContain('Could not continue the conversation. Try again.');
+    // The user did sign in; only the follow-up send failed, so the card must not claim sign-in failed.
+    expect(container.textContent).toContain("Signed in, but couldn't continue your request.");
+    expect(container.textContent).not.toContain('Sign-in failed.');
     await click('Retry');
     expect(onResume).toHaveBeenCalledTimes(2);
     expect(onResume).toHaveBeenLastCalledWith(target, { plan: 'plus', key: target.id });

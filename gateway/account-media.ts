@@ -1,12 +1,9 @@
 import type { AccountSummary } from '../shared/provider-directory.ts';
 import type { AccountMediaEntitlement } from '../shared/gateway.ts';
 
-export function planMediaEntitlement(plan?: string): AccountMediaEntitlement['mediaEntitlement'] {
-  const normalized = plan?.trim().toLowerCase();
-  if (normalized === 'plus' || normalized === 'pro' || normalized === 'max') return 'included';
-  if (normalized === 'free' || normalized === 'go') return 'not-included';
-  return 'unknown';
-}
+import { planMediaEntitlement } from '../shared/account-plan.ts';
+
+export { planMediaEntitlement };
 
 /** Advisory media metadata only. Identity and server-side model enforcement remain separate. */
 export function accountMediaState(account: AccountSummary): Partial<AccountMediaEntitlement> & { reason: string } {

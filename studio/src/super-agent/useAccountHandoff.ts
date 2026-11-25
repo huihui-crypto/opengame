@@ -228,7 +228,8 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
       if (isCurrent(run)) transition({ status: 'done' });
     }).catch(error => {
       resumed.current.delete(resumeKey);
-      if (isCurrent(run)) transition({ status: 'failed', reason: 'unknown', message: error instanceof Error ? error.message : undefined });
+      // Signed in fine; only the follow-up send failed. Retry re-sends the same continuation.
+      if (isCurrent(run)) transition({ status: 'failed', reason: 'continue_failed', message: error instanceof Error ? error.message : undefined });
     });
   }, [state, card, isCurrent, transition]);
 
