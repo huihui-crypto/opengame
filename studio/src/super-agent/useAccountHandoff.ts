@@ -6,28 +6,24 @@ import { newTrackingId } from '../motion/pageTracking';
 import { notifyProvidersChanged } from '../motion/useProviderDirectory';
 import { accountHandoffReducer, planMediaEntitlement, type AccountHandoffState } from './accountHandoff';
 
-export type AccountHandoffResume = (card: SuperAgentActionCard, account: { plan?: string }) => void | Promise<unknown>;
+export type AccountHandoffResume = (card: SuperAgentActionCard, account: { plan?: string; key: string }) => void | Promise<unknown>;
 const LOGIN_TIMEOUT = 5 * 60_000;
 const UPGRADE_TIMEOUT = 20 * 60_000;
 
-// The conversation stream unmounts while the preview is expanded. In-flight handoffs live here, keyed by card,
-// so a remounted card picks up its polling and deadline instead of falling back to idle; resumes stay once per card.
-type HandoffSession = { state: AccountHandoffState; entryId: string; deadline: number };
+// The conversation stream unmounts while the preview is expanded. In-flight handoffs live here, keyed by
+// chat + turn + card (gateway card ids repeat across turns and chats), so a remounted card picks up its
+// pending request, polling and deadline instead of falling back to idle; resumes stay once per key.
+type PlanRequest = Promise<{ url: string; opened: boolean }>;
+type HandoffSession = { state: AccountHandoffState; entryId: string; deadline: number; planRequest?: PlanRequest };
 const sessions = new Map<string, HandoffSession>();
 const resumedCards = new Set<string>();
 /** Test-only: forget in-flight handoffs and resumed cards. */
 export function resetAccountHandoffSessions() { sessions.clear(); resumedCards.clear(); }
-function restoredState(state: AccountHandoffState): AccountHandoffState | undefined {
-  switch (state.status) {
-    case 'authorizing': case 'awaiting_upgrade': case 'failed': return state;
-    // The login POST is idempotent and its result is read by polling; plans were already requested.
-    case 'starting': case 'signed_in': return { status: 'authorizing' };
-    case 'opening_plan': return { status: 'awaiting_upgrade' };
-    default: return undefined;
-  }
+function persisted(state: AccountHandoffState) {
+  return ['starting', 'signed_in', 'authorizing', 'opening_plan', 'awaiting_upgrade', 'failed'].includes(state.status);
 }
 
-export function useAccountHandoff(card: SuperAgentActionCard, onResume?: AccountHandoffResume) {
+export function useAccountHandoff(card: SuperAgentActionCard, onResume?: AccountHandoffResume, handoffKey = card.id) {
   const [state, setState] = useState<AccountHandoffState>({ status: 'idle' });
   const [alreadySignedIn, setAlreadySignedIn] = useState(false);
   const current = useRef(state);
@@ -36,8 +32,8 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
   const entryId = useRef('');
   const deadline = useRef(0);
   const resumed = useRef(resumedCards);
-  const cardId = useRef(card.id);
-  cardId.current = card.id;
+  const key = useRef(handoffKey);
+  key.current = handoffKey;
   const resume = useRef(onResume);
   resume.current = onResume;
   const polling = useRef<object | null>(null);
@@ -47,8 +43,13 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     if (!mounted.current) return;
     current.current = next;
     setState(next);
-    if (restoredState(next)) sessions.set(cardId.current, { state: next, entryId: entryId.current, deadline: deadline.current });
-    else sessions.delete(cardId.current);
+    const previous = sessions.get(key.current);
+    if (persisted(next)) {
+      sessions.set(key.current, {
+        state: next, entryId: entryId.current, deadline: deadline.current,
+        ...(next.status === 'opening_plan' && previous?.planRequest ? { planRequest: previous.planRequest } : {}),
+      });
+    } else sessions.delete(key.current);
   }, []);
   const isCurrent = useCallback((run: number) => mounted.current && generation.current === run, []);
   // Right after sign-in the connector may report signed-in before its first billing read lands (no plan yet).
@@ -63,46 +64,9 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     window.dispatchEvent(new Event('motion:account-changed'));
   }, []);
 
-  useEffect(() => {
-    mounted.current = true;
-    const run = ++generation.current;
-    const saved = sessions.get(card.id);
-    const restored = saved && restoredState(saved.state);
-    if (saved && restored) {
-      entryId.current = saved.entryId;
-      deadline.current = saved.deadline;
-      current.current = restored;
-      setState(restored);
-      return () => { mounted.current = false; generation.current++; };
-    }
-    current.current = { status: 'idle' };
-    setState(current.current);
-    setAlreadySignedIn(false);
-    // A restored card never resumes by itself. Its initial read only changes the idle CTA.
-    void gatewayRequest<AccountSummary>('settings/account').then(summary => {
-      if (isCurrent(run) && current.current.status === 'idle') {
-        setAlreadySignedIn(summary.state === 'signed-in' && !summary.billingUnavailable && planMediaEntitlement(summary.plan) === 'included');
-      }
-    }).catch(() => {});
-    return () => { mounted.current = false; generation.current++; };
-  }, [card.id, isCurrent]);
-
-  const start = useCallback(async (target: SuperAgentActionCard = card) => {
-    if (!mounted.current || !['idle', 'failed'].includes(current.current.status)) return;
-    const previous = current.current;
-    const reopenPlans = previous.status === 'failed' && previous.phase === 'upgrade';
-    const run = ++generation.current;
-    entryId.current = newTrackingId();
-    polling.current = null;
-    // Checkout failures reopen plans. Everything else (including upgrade cards) first confirms the local
-    // sign-in: a web checkout cannot sign the local connector in, so a signed-out upgrade card signs in first.
-    if (reopenPlans) {
-      deadline.current = Date.now() + UPGRADE_TIMEOUT;
-      transition({ status: 'opening_plan' });
-      return;
-    }
-    deadline.current = Date.now() + LOGIN_TIMEOUT;
-    transition({ status: 'starting' });
+  // Confirms the local sign-in, then lets the reducer pick resume / plans / polling. The login POST is
+  // idempotent, so a remounted card whose start step was cut short simply runs it again with the same entryId.
+  const runStart = useCallback(async (run: number) => {
     try {
       await cancellation.current;
       if (!isCurrent(run)) return;
@@ -121,7 +85,51 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     } catch (error) {
       if (isCurrent(run)) transition({ status: 'failed', reason: 'start_failed', message: error instanceof Error ? error.message : undefined });
     }
-  }, [card, isCurrent, notify, transition, withPlan]);
+  }, [isCurrent, notify, transition, withPlan]);
+
+  useEffect(() => {
+    mounted.current = true;
+    const run = ++generation.current;
+    const saved = sessions.get(handoffKey);
+    if (saved) {
+      entryId.current = saved.entryId;
+      deadline.current = saved.deadline;
+      const restored: AccountHandoffState = saved.state.status === 'signed_in' ? { status: 'starting' } : saved.state;
+      current.current = restored;
+      setState(restored);
+      if (restored.status === 'starting') void runStart(run);
+      return () => { mounted.current = false; generation.current++; };
+    }
+    current.current = { status: 'idle' };
+    setState(current.current);
+    setAlreadySignedIn(false);
+    // A restored card never resumes by itself. Its initial read only changes the idle CTA.
+    void gatewayRequest<AccountSummary>('settings/account').then(summary => {
+      if (isCurrent(run) && current.current.status === 'idle') {
+        setAlreadySignedIn(summary.state === 'signed-in' && !summary.billingUnavailable && planMediaEntitlement(summary.plan) === 'included');
+      }
+    }).catch(() => {});
+    return () => { mounted.current = false; generation.current++; };
+  }, [handoffKey, isCurrent, runStart]);
+
+  const start = useCallback(async (target: SuperAgentActionCard = card) => {
+    if (!mounted.current || !['idle', 'failed'].includes(current.current.status)) return;
+    const previous = current.current;
+    const reopenPlans = previous.status === 'failed' && previous.phase === 'upgrade';
+    const run = ++generation.current;
+    entryId.current = newTrackingId();
+    polling.current = null;
+    // Checkout failures reopen plans. Everything else (including upgrade cards) first confirms the local
+    // sign-in: a web checkout cannot sign the local connector in, so a signed-out upgrade card signs in first.
+    if (reopenPlans) {
+      deadline.current = Date.now() + UPGRADE_TIMEOUT;
+      transition({ status: 'opening_plan' });
+      return;
+    }
+    deadline.current = Date.now() + LOGIN_TIMEOUT;
+    transition({ status: 'starting' });
+    await runStart(run);
+  }, [card, runStart, transition]);
 
   const refresh = useCallback(async () => {
     const previous = current.current;
@@ -151,7 +159,12 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     if (state.status !== 'opening_plan') return;
     const run = generation.current;
     let active = true;
-    void gatewayRequest<{ url: string; opened: boolean }>('settings/account/subscription', 'POST', { hookId: 'super_agent_upgrade', entryId: entryId.current }).then(({ url, opened }) => {
+    // One subscription request per opening: a card remounted mid-request handles the same pending result.
+    const session = sessions.get(key.current);
+    const request: PlanRequest = session?.planRequest
+      ?? gatewayRequest<{ url: string; opened: boolean }>('settings/account/subscription', 'POST', { hookId: 'super_agent_upgrade', entryId: entryId.current });
+    if (session) session.planRequest = request;
+    void request.then(({ url, opened }) => {
       if (!active || !isCurrent(run)) return;
       let planUrl: string | undefined;
       if (!opened) {
@@ -205,15 +218,16 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
   useEffect(() => {
     if (state.status !== 'resuming') return;
     const run = generation.current;
-    if (resumed.current.has(card.id)) { transition({ status: 'done' }); return; }
-    resumed.current.add(card.id);
+    const resumeKey = key.current;
+    if (resumed.current.has(resumeKey)) { transition({ status: 'done' }); return; }
+    resumed.current.add(resumeKey);
     // Reserve the card before invoking the callback, including synchronous callbacks and Strict Mode effects.
     void Promise.resolve().then(() => {
-      if (isCurrent(run)) return resume.current?.(card, { plan: state.plan });
+      if (isCurrent(run)) return resume.current?.(card, { plan: state.plan, key: resumeKey });
     }).then(() => {
       if (isCurrent(run)) transition({ status: 'done' });
     }).catch(error => {
-      resumed.current.delete(card.id);
+      resumed.current.delete(resumeKey);
       if (isCurrent(run)) transition({ status: 'failed', reason: 'unknown', message: error instanceof Error ? error.message : undefined });
     });
   }, [state, card, isCurrent, transition]);

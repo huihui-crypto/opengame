@@ -5,14 +5,16 @@ import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { useAccountHandoff, type AccountHandoffResume } from './useAccountHandoff';
 
-export function AccountHandoffCard({ card, onResume, onOpenSettings }: {
+export function AccountHandoffCard({ card, handoffKey, onResume, onOpenSettings }: {
   card: SuperAgentActionCard;
+  /** Unique per chat + turn; gateway card ids repeat across turns and chats. */
+  handoffKey?: string;
   onResume?: AccountHandoffResume;
   onOpenSettings?: (card: SuperAgentActionCard, target: 'account' | 'api_key') => void;
 }) {
   const { t } = useI18n();
   const descriptionId = useId();
-  const { state, alreadySignedIn, start, retry, cancel, refresh } = useAccountHandoff(card, onResume);
+  const { state, alreadySignedIn, start, retry, cancel, refresh } = useAccountHandoff(card, onResume, handoffKey);
   const signIn = card.kind === 'sign_in';
   let title = t(signIn ? 'Sign in with OpenDesign' : 'Upgrade to OpenDesign Plus');
   let description = t(signIn

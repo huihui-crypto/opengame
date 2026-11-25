@@ -1593,6 +1593,7 @@ export function ExecutionTimeline({
                         <TurnActionCard
                           key={card.id}
                           card={card}
+                          handoffKey={`${chat.id}:${turn.id}:${card.id}`}
                           onTrigger={onTriggerActionCard}
                           onResume={onResumeAfterAccount}
                           onOpenSettings={onOpenActionCardSettings}
@@ -1782,11 +1783,13 @@ function actionCardMeta(kind: SuperAgentActionCard['kind']): {
 
 function TurnActionCard({
   card,
+  handoffKey,
   onTrigger,
   onResume,
   onOpenSettings,
 }: {
   card: SuperAgentActionCard;
+  handoffKey?: string;
   onTrigger?: (card: SuperAgentActionCard) => void;
   onResume?: AccountHandoffResume;
   onOpenSettings?: (card: SuperAgentActionCard, target: 'account' | 'api_key') => void;
@@ -1794,7 +1797,7 @@ function TurnActionCard({
   const { t } = useI18n();
   const descriptionId = useId();
   if (card.kind === 'sign_in' || card.kind === 'upgrade_free' || card.kind === 'upgrade_go') {
-    return <AccountHandoffCard card={card} onResume={onResume} onOpenSettings={onOpenSettings} />;
+    return <AccountHandoffCard card={card} handoffKey={handoffKey} onResume={onResume} onOpenSettings={onOpenSettings} />;
   }
   const meta = actionCardMeta(card.kind);
   return (

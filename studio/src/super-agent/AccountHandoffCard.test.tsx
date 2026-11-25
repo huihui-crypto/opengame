@@ -53,9 +53,9 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
-async function render(target = card, strict = false) {
+async function render(target = card, strict = false, handoffKey?: string) {
   await act(async () => {
-    const content = <I18nProvider initialLocale="en"><AccountHandoffCard card={target} onResume={onResume} onOpenSettings={onOpenSettings} /></I18nProvider>;
+    const content = <I18nProvider initialLocale="en"><AccountHandoffCard card={target} handoffKey={handoffKey} onResume={onResume} onOpenSettings={onOpenSettings} /></I18nProvider>;
     root.render(strict ? <StrictMode>{content}</StrictMode> : content);
   });
 }
@@ -70,7 +70,7 @@ describe('AccountHandoffCard', () => {
     expect(container.querySelector('a')?.getAttribute('href')).toBe(loginResult.authorizationUrl);
     account = { ...account, state: 'signed-in', plan: 'plus' };
     await tick(2_000);
-    expect(onResume).toHaveBeenCalledExactlyOnceWith(card, { plan: 'plus' });
+    expect(onResume).toHaveBeenCalledExactlyOnceWith(card, { plan: 'plus', key: card.id });
     expect(notifyProvidersChanged).toHaveBeenCalledTimes(1);
     expect(status()).toBe('done');
     expect(container.querySelector('button')).toBeNull();
@@ -91,7 +91,7 @@ describe('AccountHandoffCard', () => {
     account = { ...account, plan: 'plus' };
     await click("I've upgraded");
     expect(request).toHaveBeenCalledWith('settings/account?refresh=true');
-    expect(onResume).toHaveBeenCalledExactlyOnceWith(card, { plan: 'plus' });
+    expect(onResume).toHaveBeenCalledExactlyOnceWith(card, { plan: 'plus', key: card.id });
   });
   it.each(['upgrade_free', 'upgrade_go'] as const)('opens plans directly for a signed-in %s account without signing in', async kind => {
     const target = { ...card, kind };
@@ -144,6 +144,54 @@ describe('AccountHandoffCard', () => {
     await tick(2_000);
     expect(onResume).toHaveBeenCalledTimes(1);
     expect(request.mock.calls.filter(call => call[0] === 'settings/account/login')).toHaveLength(1);
+  });
+  it('resumes a later card with the same gateway id in another turn or chat', async () => {
+    account = { state: 'signed-in', plan: 'plus', consoleUrl: '' };
+    await render(card, false, 'chat-a:turn-1:signin');
+    await click('Continue');
+    expect(onResume).toHaveBeenLastCalledWith(card, { plan: 'plus', key: 'chat-a:turn-1:signin' });
+    await render(card, false, 'chat-b:turn-1:signin');
+    await click('Continue');
+    expect(onResume).toHaveBeenCalledTimes(2);
+    expect(onResume).toHaveBeenLastCalledWith(card, { plan: 'plus', key: 'chat-b:turn-1:signin' });
+    expect(status()).toBe('done');
+  });
+  it('finishes a pending plan request after the card remounts', async () => {
+    checkout.opened = false;
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    const original = request.getMockImplementation()!;
+    let openPlans!: (value: typeof checkout) => void;
+    request.mockImplementation((...args) => args[0] === 'settings/account/subscription'
+      ? new Promise<typeof checkout>(resolve => { openPlans = resolve; }) : original(...args));
+    account = { state: 'signed-in', plan: 'free', consoleUrl: '' };
+    await render({ ...card, kind: 'upgrade_free' });
+    await click('Upgrade to Plus');
+    expect(status()).toBe('opening_plan');
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render({ ...card, kind: 'upgrade_free' });
+    await act(async () => openPlans(checkout));
+    expect(status()).toBe('awaiting_upgrade');
+    expect(container.querySelector('a')?.getAttribute('href')).toBe(checkout.url);
+    expect(request.mock.calls.filter(call => call[0] === 'settings/account/subscription')).toHaveLength(1);
+  });
+  it('continues an unfinished start step after the card remounts', async () => {
+    const original = request.getMockImplementation()!;
+    let firstRead!: (value: AccountSummary) => void;
+    let held = true;
+    request.mockImplementation((...args) => held && args[0] === 'settings/account' && request.mock.calls.filter(call => call[0] === 'settings/account').length === 2
+      ? new Promise<AccountSummary>(resolve => { firstRead = resolve; }) : original(...args));
+    await render();
+    await click('Sign in & continue');
+    expect(status()).toBe('starting');
+    held = false;
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render();
+    expect(request).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'super_agent_signin', entryId: expect.any(String) });
+    expect(status()).toBe('authorizing');
+    await act(async () => firstRead({ state: 'signed-out', consoleUrl: '' }));
+    expect(status()).toBe('authorizing');
   });
   it('times out sign-in, cancels the connector, and permits retry', async () => {
     await render();
@@ -204,7 +252,7 @@ describe('AccountHandoffCard', () => {
     expect(container.textContent).toContain('Could not continue the conversation. Try again.');
     await click('Retry');
     expect(onResume).toHaveBeenCalledTimes(2);
-    expect(onResume).toHaveBeenLastCalledWith(target, { plan: 'plus' });
+    expect(onResume).toHaveBeenLastCalledWith(target, { plan: 'plus', key: target.id });
     expect(status()).toBe('done');
     await tick(10_000);
     expect(onResume).toHaveBeenCalledTimes(2);
@@ -305,7 +353,7 @@ describe('AccountHandoffCard', () => {
     await click('Sign in & continue');
     account = { ...account, state: 'signed-in', ...value };
     await tick(2_000);
-    expect(onResume).toHaveBeenCalledExactlyOnceWith(card, { plan: value.plan });
+    expect(onResume).toHaveBeenCalledExactlyOnceWith(card, { plan: value.plan, key: card.id });
     expect(request.mock.calls.some(call => call[0] === 'settings/account/subscription')).toBe(false);
   });
   it('refreshes checkout immediately when the document becomes visible', async () => {

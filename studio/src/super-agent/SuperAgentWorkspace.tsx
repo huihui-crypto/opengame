@@ -1551,9 +1551,8 @@ export function SuperAgentWorkspace({
     }
   }, [handlePlayGame]);
 
-  const handleResumeAfterAccount = async (card: SuperAgentActionCard, { plan }: { plan?: string }) => {
-    // One stable requestId per card: a retry after a lost response replays instead of enqueueing twice.
-    const key = `${activeChat?.id ?? ''}:${card.id}`;
+  const handleResumeAfterAccount = async (_card: SuperAgentActionCard, { plan, key }: { plan?: string; key: string }) => {
+    // One stable requestId per card instance: a retry after a lost response replays instead of enqueueing twice.
     let requestId = resumeRequestIds.current.get(key);
     if (!requestId) {
       requestId = `sa-resume-${typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Date.now().toString(36)}`;
