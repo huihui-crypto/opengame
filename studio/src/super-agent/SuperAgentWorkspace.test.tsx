@@ -559,7 +559,7 @@ it('republishes the same target once after signing in from the publish card', as
   });
   await flush();
   const publishCard = () => container.querySelector('.om-sa-action-card[data-kind="web_publish_sign_in"]')!;
-  const button = Array.from(publishCard().querySelectorAll('button')).find(item => item.textContent === 'Publish')!;
+  const button = Array.from(publishCard().querySelectorAll('button')).find(item => item.textContent === 'Publish again')!;
   expect(button).toBeTruthy();
   await act(async () => button.click());
   await flush();

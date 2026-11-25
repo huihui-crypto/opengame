@@ -33,7 +33,7 @@ export function AccountHandoffCard({ card, handoffKey, onResume, onOpenSettings 
 
   switch (state.status) {
     case 'idle':
-      if (alreadySignedIn) { title = t("You're signed in"); description = ''; label = t(publish ? 'Publish' : 'Continue'); }
+      if (alreadySignedIn) { title = t("You're signed in"); description = ''; label = t(publish ? 'Publish again' : 'Continue'); }
       else if (!signIn) secondary = 'settings';
       break;
     case 'starting':

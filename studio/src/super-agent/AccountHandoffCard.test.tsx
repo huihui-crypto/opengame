@@ -454,10 +454,10 @@ describe('AccountHandoffCard — publish sign-in', () => {
     await click('Sign in & publish');
     expect(request).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'cloud_share_signin', entryId: expect.any(String) });
   });
-  it('offers Publish when already signed in on a Free plan and republishes without signing in', async () => {
+  it('offers Publish again when already signed in on a Free plan and republishes without signing in', async () => {
     account = { state: 'signed-in', plan: 'free', consoleUrl: '' };
     await render(gameCard);
-    await click('Publish');
+    await click('Publish again');
     expect(request).not.toHaveBeenCalledWith('settings/account/login', expect.anything(), expect.anything());
     expect(onResume).toHaveBeenCalledExactlyOnceWith(gameCard, { plan: 'free', key: gameCard.id });
   });
@@ -479,7 +479,7 @@ describe('AccountHandoffCard — publish sign-in', () => {
     account = { state: 'signed-in', plan: 'plus', consoleUrl: '' };
     onResume.mockRejectedValueOnce(new Error('Could not continue the conversation. Try again.'));
     await render(gameCard);
-    await click('Publish');
+    await click('Publish again');
     expect(status()).toBe('failed');
     expect(container.textContent).toContain('Could not continue the conversation. Try again.');
     await click('Retry');
