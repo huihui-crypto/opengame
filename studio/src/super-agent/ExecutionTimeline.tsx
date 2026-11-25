@@ -20,9 +20,13 @@ import { Tooltip } from '../components/ui/Tooltip';
 import { useI18n, type Translate } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { WorkingIndicator } from '../motion/AssetCreationVisuals';
+import { BLACK_FRIDAY_CAMPAIGN, campaignPricingUrl, newCampaignEntryId, useBlackFridayActive } from '../motion/campaignAttribution';
+import { useCheckoutReturnRefresh } from '../motion/entitlementAttribution';
 import { readDirectGameBrief } from '../motion/game/gameSuperAgent';
 import { AccountHandoffCard } from './AccountHandoffCard';
 import type { AccountHandoffResume } from './useAccountHandoff';
+import { openBalanceGate } from '../motion/monetization/monetizationGateBus';
+import { reportEntitlementGateClick, reportEntitlementGateView } from '../motion/pageTracking';
 import { ArtifactDeliverableCard } from './ArtifactDeliverableCard';
 import { FilesChangedCard, UnifiedDiffView } from './ChangedFilesTree';
 import { InlineMentionChip } from './MentionNode';
@@ -1774,6 +1778,17 @@ function actionCardMeta(kind: SuperAgentActionCard['kind']): {
   }
 }
 
+function actionCardHookId(kind: SuperAgentActionCard['kind']) {
+  switch (kind) {
+    case 'sign_in': return 'studio_generate' as const;
+    case 'upgrade_free':
+    case 'upgrade_go': return 'studio_free_gate' as const;
+    case 'top_up': return 'failure_card_topup' as const;
+    case 'web_publish_sign_in': return 'game_publish_signin' as const;
+    default: return null;
+  }
+}
+
 function TurnActionCard({
   card,
   handoffKey,
@@ -1787,12 +1802,57 @@ function TurnActionCard({
   onResume?: AccountHandoffResume;
   onOpenSettings?: (card: SuperAgentActionCard, target: 'account' | 'api_key') => void;
 }) {
-  const { t } = useI18n();
-  const descriptionId = useId();
   if (card.kind === 'sign_in' || card.kind === 'upgrade_free' || card.kind === 'upgrade_go' || card.kind === 'web_publish_sign_in') {
     return <AccountHandoffCard card={card} handoffKey={handoffKey} onResume={onResume} onOpenSettings={onOpenSettings} />;
   }
+  return <GateActionCard card={card} onTrigger={onTrigger} />;
+}
+
+function GateActionCard({
+  card,
+  onTrigger,
+}: {
+  card: SuperAgentActionCard;
+  onTrigger?: (card: SuperAgentActionCard) => void;
+}) {
+  const { locale, t } = useI18n();
+  const descriptionId = useId();
   const meta = actionCardMeta(card.kind);
+  const hookId = actionCardHookId(card.kind);
+  const campaign = useBlackFridayActive();
+  const [entryId, setEntryId] = useState(newCampaignEntryId);
+  const markCheckoutReturn = useCheckoutReturnRefresh('creative_studio', hookId ?? 'studio_free_gate');
+  const reportedRef = useRef(false);
+
+  useEffect(() => {
+    if (!hookId || reportedRef.current) return;
+    reportedRef.current = true;
+    reportEntitlementGateView('creative_studio', hookId, {
+      studio_id: 'game',
+      entry_id: entryId,
+      ...(campaign ? { campaign_id: BLACK_FRIDAY_CAMPAIGN } : {}),
+    });
+  }, [hookId, entryId, campaign]);
+
+  const isDirectUpgrade = card.kind === 'upgrade_free' || card.kind === 'upgrade_go';
+  const isTopUp = card.kind === 'top_up';
+
+  function handleTrigger() {
+    if (hookId) {
+      reportEntitlementGateClick(
+        'creative_studio',
+        card.kind === 'sign_in' || card.kind === 'web_publish_sign_in' ? 'start_sign_in' : 'open_pricing',
+        hookId,
+        { studio_id: 'game', entry_id: entryId, ...(campaign ? { campaign_id: BLACK_FRIDAY_CAMPAIGN } : {}) },
+      );
+    }
+    if (isTopUp) {
+      openBalanceGate({ reason: 'insufficient_balance', pageName: 'creative_studio', studioId: 'game' });
+      return;
+    }
+    onTrigger?.(card);
+  }
+
   return (
     <div className="om-sa-action-card" data-kind={card.kind} role="group" aria-label={t(meta.title)}>
       <span className="om-sa-action-card-icon" aria-hidden="true">
@@ -1802,14 +1862,38 @@ function TurnActionCard({
         <strong>{t(meta.title)}</strong>
         <p id={descriptionId}>{t(meta.description)}</p>
       </div>
-      {onTrigger && (
+      {isDirectUpgrade ? (
+        <a
+          className="om-sa-deliverable-btn om-sa-action-card-btn"
+          data-primary
+          href={campaignPricingUrl(locale, 'opengame_agent_upgrade', entryId)}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-describedby={descriptionId}
+          onClick={() => {
+            const clickedId = entryId;
+            markCheckoutReturn(clickedId);
+            if (hookId) {
+              reportEntitlementGateClick('creative_studio', 'open_pricing', hookId, {
+                studio_id: 'game',
+                entry_id: clickedId,
+                ...(campaign ? { campaign_id: BLACK_FRIDAY_CAMPAIGN } : {}),
+              });
+            }
+            window.setTimeout(() => setEntryId(newCampaignEntryId()), 0);
+          }}
+        >
+          <span>{campaign ? t('Upgrade · 50% OFF') : t(meta.cta)}</span>
+          <RemixIcon name="external-link-line" size={14} />
+        </a>
+      ) : (isTopUp || onTrigger) && (
         <Button
           variant="plain"
           type="button"
           className="om-sa-deliverable-btn om-sa-action-card-btn"
           data-primary
           aria-describedby={descriptionId}
-          onClick={() => onTrigger(card)}
+          onClick={handleTrigger}
         >
           <span>{t(meta.cta)}</span>
           <RemixIcon name="arrow-right-line" size={14} />

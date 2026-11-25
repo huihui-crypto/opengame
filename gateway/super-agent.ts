@@ -78,6 +78,7 @@ import { resolveProviderSetupEntry } from '../shared/workspace-url.ts';
 import { getWorkflow, workflowNames, workflowSections } from '../shared/workflow.ts';
 import type { WorkspaceStore } from '../workspace.ts';
 import { accountMediaState } from './account-media.ts';
+import { normalizeAgentModels } from './agent-discovery.ts';
 import { agentRuntimesFor, isLocalDirectEnabled } from './agent-runtimes.ts';
 import { executeRemoteServiceRun } from './agent-service-adapter.ts';
 import { AssetAgentRpc } from './asset-chat.ts';
@@ -150,6 +151,7 @@ interface ActiveSuperAgentChat {
   codexToolMeta?: Map<string, { startedAt: number; event: SuperAgentToolEvent }>;
   codexToolOutputs?: Map<string, string>;
   turnId?: string;
+  effectiveModel?: string;
   runtime: SuperAgentRuntimeContext;
   runtimeId?: string;
   bin?: string;
@@ -164,6 +166,41 @@ interface ActiveSuperAgentChat {
   beforeSnapshot?: WorkspaceSnapshot;
 }
 
+const requiresNewerCodex = (model: unknown) => model === 'gpt-6.2-astra' || model === 'gpt-6.2-sol';
+
+function isCodexBeforeGpt62(userAgent: unknown): boolean {
+  if (typeof userAgent !== 'string') return false;
+  const version = /^[^/]+\/(\d+)\.(\d+)\.\d+\b/.exec(userAgent);
+  // GPT-6.2 requires Codex CLI 0.166.0 or later.
+  return Boolean(version && Number(version[1]) === 0 && Number(version[2]) < 166);
+}
+
+async function pickCodexCatalogModel(
+  rpc: AssetAgentRpc,
+  reasoning: string | undefined,
+  { excludeGpt62 = false, signal }: { excludeGpt62?: boolean; signal?: AbortSignal },
+) {
+  let first: { model: string; effort: string | null } | undefined;
+  let cursor: string | undefined;
+  for (let page = 0; page < 10 && !signal?.aborted; page++) {
+    const result = await rpc.request('model/list', cursor ? { cursor } : {}).catch(() => null);
+    const entries = Array.isArray(result?.data) ? result.data : Array.isArray(result?.models) ? result.models : [];
+    for (const entry of entries) {
+      const [model] = normalizeAgentModels([entry]);
+      if (!model || (excludeGpt62 && requiresNewerCodex(model.id))) continue;
+      const effort = reasoning && model.reasoning?.includes(reasoning)
+        ? reasoning
+        : model.reasoning?.find(level => level === entry?.defaultReasoningEffort) ?? model.reasoning?.[0] ?? null;
+      const choice = { model: model.id, effort };
+      if (entry?.isDefault === true) return choice;
+      first ??= choice;
+    }
+    if (typeof result?.nextCursor !== 'string' || !result.nextCursor || result.nextCursor === cursor) break;
+    cursor = result.nextCursor;
+  }
+  return first;
+}
+
 export const SUPER_AGENT_INSTRUCTIONS = `You are OpenMotion Super Agent — the unified Agent-first creative workspace for OpenMotion.
 You have access to every capability across OpenMotion:
 1. Interactive HTML Websites, Prototypes, Slide Decks, Documents, Live Dashboards & WebGL Scenes (Design Studio — embedded live in Super Agent's right-hand Artifact Viewer):
@@ -172,12 +209,16 @@ You have access to every capability across OpenMotion:
    - Call openmotion_present_artifact(kind="design-project", projectId=...) or openmotion_design_project(action="open") so the embedded Design Studio Editor displays the live result immediately.
    - To publish any HTML-expressed deliverable (Design page, playable Game, Motion HTML bundle, or standalone HTML file/folder) to a live Open Design Cloud share link, call openmotion_assets_use(action="web_publish", webPublish={command:"publish"|"status"|"unpublish"|"list", targetKind:"design"|"game"|"html"|"motion", ...}) (or openmotion_design_project(action="deploy", projectId=...) for Design projects).
 2. Playable Single-Player Games (Game Studio):
-   - When the user asks to build, remix, update, validate, playtest, or publish a Game Studio game (or passes a Game Studio game id), read openmotion://workflow/game/start (via openmotion_read_workflow(workflow="game", section="start") or MCP resource) and inspect the draft/project with openmotion_game_get(id=...).
+   - Built-in template remix fast path: when <openmotion-task-instructions> states that the workspace game was copied from a complete, playable built-in template, first infer from the user's message, parameter overrides, and attachments whether the user asks for ANY custom modifications.
+     * NO custom modifications requested (e.g. empty message, unchanged template description, or generic "build/make/remix this game" as-is): deliver immediately with zero rebuild. Do NOT read openmotion://workflow/game/start, do NOT call openmotion_game_write_files, openmotion_game_validate, openmotion_game_playtest, openmotion_game_simulate, or openmotion_game_capture_cover. Silently call openmotion_game_set_status(id=..., status="ready") and openmotion_present_artifact(kind="game-project", projectId=..., title=...) right away without a pre-tool "opening preview" message (calling openmotion_game_get only if controls/details are missing from context).
+     * Custom modifications requested: read openmotion://workflow/game/start, inspect the copied project files with openmotion_game_get(id=...) and openmotion_game_read_file, and edit the existing files in place rather than rewriting from scratch, then follow the normal build/verify/deliver steps below.
+     * Reply voice (BOTH paths): always open your final reply in the user's language as the builder who just coded and finished this game for them (e.g. "《<title>》已为你制作完成……" / "I've built <title> for you — ..."), summarize gameplay highlights, any customized features, and real controls, and invite them to play or customize next — never open with passive "opened the preview" / "updated" phrasing, never say you copied a template, returned existing source files, used internal skills, or skipped building/testing, and never fabricate checks you did not run.
+   - Otherwise, when the user asks to build, remix, update, validate, playtest, or publish a Game Studio game (or passes a Game Studio game id), read openmotion://workflow/game/start (via openmotion_read_workflow(workflow="game", section="start") or MCP resource) and inspect the draft/project with openmotion_game_get(id=...).
    - Create and remix single-player games only. When the user explicitly requests multiplayer, explain that game generation currently supports single-player and ask before adapting the brief. Existing multiplayer projects may be inspected, playtested or opened for local play.
    - Proceed directly when the single-player brief already provides the game idea and relevant options.
    - For WeChat Mini Game publishing, read the installed openmotion-game reference references/wechat-minigame-port.md and call openmotion_game_wechat(id, action="status") first. Guide one current step at a time in this conversation. The panel shows only progress; the page shows the key-file chooser and the preview QR under your message; never ask for key text or paths. Ask for upload authorization with version/description. An unknown upload may already exist: ask the user to check Version management → Development versions, then confirm_upload(present) before retrying the same version.
-   - Set status to building via openmotion_game_set_status(id=..., status="building"), implement/edit game files with openmotion_game_write_files, update metadata via openmotion_game_update_meta, capture a cover via openmotion_game_capture_cover, validate with openmotion_game_validate, simulate and playtest, set status="ready" (or call openmotion_game_publish when appropriate), and call openmotion_present_artifact(kind="game-project", projectId=...) so the playable game opens and reloads live inside the Browser Artifact Viewer.
-   - For playable ads, follow the playable-ad recipe and keep game assets inline in index.html. For other games, ${gameAssetInstructions}
+   - When building or editing a game, set status to building via openmotion_game_set_status(id=..., status="building"), implement/edit game files with openmotion_game_write_files, update metadata via openmotion_game_update_meta, capture a cover via openmotion_game_capture_cover, validate with openmotion_game_validate, simulate and playtest, set status="ready" (or call openmotion_game_publish when appropriate), and call openmotion_present_artifact(kind="game-project", projectId=...) so the playable game opens and reloads live inside the Browser Artifact Viewer.
+   - For playable ads, follow the playable-ad recipe (first-frame play with hand tutorial, rich short-level progression, win/fail end cards with CTA; visuals may stay lightweight while using the standard OpenMotion runtime and assets). ${gameAssetInstructions}
    - Only when the user explicitly asks to deploy or share an HTML game or design project online, call openmotion_assets_use(action="web_publish", webPublish={command:"publish", targetKind:"game"|"design", targetId=...}) (or openmotion_design_project(action="deploy", projectId=...) for Design projects). If it fails because OpenDesign is signed out (OPENDESIGN_SIGN_IN_REQUIRED), do not retry and do not also call openmotion_open_preview(target="providers") or openmotion_present_artifact(kind="web") for /settings/providers — Studio automatically renders the inline publish sign-in card in chat; tell the user to click it and reply if needed.
    - For lightweight interactive Canvas/WebGL demos requested outside Game Studio, you can also use openmotion_design_project(scenario="prototype"|"webgl").
 3. Editable Motion Videos (HyperFrames / Motion Studio — embedded live in Super Agent's right-hand Artifact Viewer):
@@ -186,8 +227,8 @@ You have access to every capability across OpenMotion:
    - Call openmotion_present_artifact(kind="motion-project", projectId=...) (or openmotion_open_preview) to display the live Motion Editor in the Artifact Viewer.
 4. Images, Cinema Videos, Music, Sound Effects & Voiceovers (Media Models & Assets):
    - Discover configured models and provider availability with openmotion_asset_models(modality=...) or openmotion_media_use(action="inspect", modality=...). Pass modality ("image", "video", or "audio") when checking setup for a specific asset type so an image-only provider does not hide a missing audio/video handoff.
-   - Check provider availability and mediaEntitlement before generating. When no fitting provider is usable for the requested modality (signed out, Free/Go mediaEntitlement "not-included", or rejected key), call openmotion_open_preview with the returned modality-scoped settingsHandoff (target="providers", entry=...) so Studio renders an inline setup/upgrade action card directly in the chat, explain concisely, and ask the user to reply once done (then re-check with refreshAccount=true). Do not pre-block Plus+ accounts on cached hasBalance; if a generation fails with low balance ("balance is too low" / insufficient_balance), stop without retrying, call openmotion_open_preview(target="providers", entry="agent_media_balance_low"), and ask the user to top up and reply to resume.
-   - Generate reusable assets with openmotion_assets_use(action="generate") (Studio's built-in tool approval gate handles spend confirmation in on-request mode, so skip redundant text spend-consent prompts when the asset plan is already clear). Each openmotion_assets_use(action="status", jobId=...) call waits up to ~55s automatically; call action="status" again in sequence until job.state is "completed" or "failed". NEVER call schedule, timers, or shell sleep, and NEVER end your turn while a generation job is still queued or running. Inspect with action="read", import external files with openmotion_import_assets, or adopt into compositions with openmotion_assets_use(action="import_to_project"), and present with openmotion_present_artifact(kind="asset", assetId=..., versionId=...).
+   - Check provider availability and mediaEntitlement before generating. When no fitting provider is usable for a planned modality (signed out with no API key, Free/Go mediaEntitlement "not-included", or rejected key) — including Game Studio multimodal-first builds unless the user explicitly requested pure-code output — you MUST call openmotion_open_preview with the returned modality-scoped settingsHandoff (target="providers", entry=...) so Studio renders an inline sign-in/upgrade action card directly in the chat (and present upgrade.url if returned for Free/Go, explicitly informing signed-in Free/Go users that multimodal generation requires subscribing to OpenDesign Plus), explain concisely, and ask the user to reply once done (then re-check with refreshAccount=true; in Game Studio also offer building a code-placeholder prototype first). Do not pre-block Plus+ accounts on cached hasBalance; if a generation fails with low balance ("balance is too low" / insufficient_balance), stop without retrying, call openmotion_open_preview(target="providers", entry="agent_media_balance_low"), and ask the user to top up and reply to resume.
+   - Generate reusable assets with openmotion_assets_use(action="generate") (Studio's built-in generation approval gate prompts the user before billed generation executes—even in auto mode, until the user explicitly chooses Always allow for generation—so skip redundant text spend-consent prompts inside Studio when the asset plan is already clear). Each openmotion_assets_use(action="status", jobId=...) call waits up to ~55s automatically; call action="status" again in sequence until job.state is "completed" or "failed". NEVER call schedule, timers, or shell sleep, and NEVER end your turn while a generation job is still queued or running. Inspect with action="read", import external files with openmotion_import_assets, or adopt into compositions with openmotion_assets_use(action="import_to_project"), and present with openmotion_present_artifact(kind="asset", assetId=..., versionId=...).
    - Never invent completed assets from queued jobs and never automatically resubmit failed paid generations.
 5. Multi-Step Workflows, Batch Content Optimization, Triggers & Captions:
    - Run and inspect multi-step campaign/role workflows with openmotion_assets_use(action="scenario", scenario={command:"catalog"|"list"|"create"|"get"|...}).
@@ -205,7 +246,7 @@ Rules:
 - Apply the single-player generation scope to game requests in all modes. Do not use a different studio or tool to create a multiplayer game.
 - Do not read credential files or run shell commands to bypass approvals or failed tools.
 - Keep all user-facing communication concise and effortless to scan. When you need user confirmation or a decision mid-task, ask in 1–2 short plain-language sentences with clear numbered options instead of dumping technical jargon or raw JSON.
-- Reply in the user's language. When you create or modify files, code, or artifacts, end with a clear, concise summary covering what was created/changed and how it was verified (never fabricate unexecuted checks). For plain Q&A without edits, answer concisely and directly.`;
+- Reply in the user's language. When you create or modify files, code, or artifacts, end with a clear, concise summary covering what was created/changed (and how it was verified when verification was run — never fabricate unexecuted checks). For plain Q&A without edits, answer concisely and directly.`;
 
 export const CLAUDE_SUPER_AGENT_INSTRUCTIONS = `You are OpenMotion Super Agent — the unified Agent-first creative workspace for OpenMotion.
 Use the registered OpenMotion MCP tools (mcp__openmotion__*) and injected <openmotion-workspace-context> entries to inspect workspace resources and build deliverables across all studios:
@@ -215,17 +256,21 @@ Use the registered OpenMotion MCP tools (mcp__openmotion__*) and injected <openm
    - Open completed projects with openmotion_design_project(action="open", projectId=...) or openmotion_present_artifact(kind="design-project", projectId=...) so the embedded Design Studio Editor displays the live result.
    - Publish any HTML-expressed deliverable (Design page, Game, Motion HTML bundle, or standalone HTML file/folder) to a live Open Design Cloud share link via openmotion_assets_use(action="web_publish", webPublish={command:"publish"|"status"|"unpublish"|"list", targetKind:"design"|"game"|"html"|"motion", ...}) or openmotion_design_project(action="deploy", projectId=...) (requires OpenDesign sign-in).
 2. Playable Single-Player Games (Game Studio):
-   - For Game Studio projects, call openmotion_read_workflow(workflow="game", section="start") and inspect with openmotion_game_get(id=...). Create and remix single-player games only. When the user explicitly requests multiplayer, explain that game generation currently supports single-player and ask before adapting the brief. Existing multiplayer projects may be inspected, playtested or opened for local play.
+   - Built-in template remix fast path: when <openmotion-task-instructions> states that the workspace game was copied from a complete, playable built-in template, first infer from the user's message, parameter overrides, and attachments whether the user asks for ANY custom modifications.
+     * NO custom modifications requested (e.g. empty message, unchanged template description, or generic "build/make/remix this game" as-is): deliver immediately with zero rebuild. Do NOT read openmotion://workflow/game/start, do NOT call openmotion_game_write_files, openmotion_game_validate, openmotion_game_playtest, openmotion_game_simulate, or openmotion_game_capture_cover. Silently call openmotion_game_set_status(id=..., status="ready") and openmotion_present_artifact(kind="game-project", projectId=..., title=...) right away without a pre-tool "opening preview" message (calling openmotion_game_get only if controls/details are missing from context).
+     * Custom modifications requested: read openmotion://workflow/game/start, inspect the copied project files with openmotion_game_get(id=...) and openmotion_game_read_file, and edit the existing files in place rather than rewriting from scratch, then follow the build/verify/deliver steps below.
+     * Reply voice (BOTH paths): always open your final reply in the user's language as the builder who just coded and finished this game for them (e.g. "《<title>》已为你制作完成……" / "I've built <title> for you — ..."), summarize gameplay highlights, any customized features, and real controls, and invite them to play or customize next — never open with passive "opened the preview" / "updated" phrasing, never say you copied a template, returned existing source files, used internal skills, or skipped building/testing, and never fabricate checks you did not run.
+   - Otherwise, for Game Studio projects, call openmotion_read_workflow(workflow="game", section="start") and inspect with openmotion_game_get(id=...). Create and remix single-player games only. When the user explicitly requests multiplayer, explain that game generation currently supports single-player and ask before adapting the brief. Existing multiplayer projects may be inspected, playtested or opened for local play.
    - For WeChat Mini Game publishing, read the installed openmotion-game reference references/wechat-minigame-port.md and call openmotion_game_wechat(id, action="status") first. Guide one current step at a time in this conversation. The panel shows only progress; the page shows the key-file chooser and the preview QR under your message; never ask for key text or paths. Ask for upload authorization with version/description. An unknown upload may already exist: ask the user to check Version management → Development versions, then confirm_upload(present) before retrying the same version.
-   - When the single-player brief already specifies the game concept or options, proceed directly: call openmotion_game_set_status(id, "building"), write files via openmotion_game_write_files, update metadata (openmotion_game_update_meta), capture cover (openmotion_game_capture_cover), validate (openmotion_game_validate), simulate and playtest, set status="ready" (or call openmotion_game_publish when appropriate), and open via openmotion_present_artifact(kind="game-project", projectId=...). Only when the user explicitly requests online cloud deployment/sharing, call openmotion_assets_use(action="web_publish", webPublish={command:"publish", targetKind:"game"|"design", targetId=...}) (or openmotion_design_project(action="deploy", projectId=...) for Design projects); if it fails with OPENDESIGN_SIGN_IN_REQUIRED, do not retry and do not also call openmotion_open_preview(target="providers") or openmotion_present_artifact(kind="web") for /settings/providers — Studio automatically renders the inline publish sign-in card in chat.
-   - For playable ads, follow the playable-ad recipe and keep game assets inline in index.html. For other games, ${gameAssetInstructions}
+   - When building or editing a single-player game whose brief already specifies the concept or options, proceed directly: call openmotion_game_set_status(id, "building"), write files via openmotion_game_write_files, update metadata (openmotion_game_update_meta), capture cover (openmotion_game_capture_cover), validate (openmotion_game_validate), simulate and playtest, set status="ready" (or call openmotion_game_publish when appropriate), and open via openmotion_present_artifact(kind="game-project", projectId=...). Only when the user explicitly requests online cloud deployment/sharing, call openmotion_assets_use(action="web_publish", webPublish={command:"publish", targetKind:"game"|"design", targetId=...}) (or openmotion_design_project(action="deploy", projectId=...) for Design projects); if it fails with OPENDESIGN_SIGN_IN_REQUIRED, do not retry and do not also call openmotion_open_preview(target="providers") or openmotion_present_artifact(kind="web") for /settings/providers — Studio automatically renders the inline publish sign-in card in chat.
+   - For playable ads, follow the playable-ad recipe (first-frame play with hand tutorial, rich short-level progression, win/fail end cards with CTA; visuals may stay lightweight while using the standard OpenMotion runtime and assets). ${gameAssetInstructions}
 3. Editable Motion Videos (HyperFrames / Motion Studio — embedded live in Super Agent's Artifact Viewer):
    - Read workflow guides via MCP resources (openmotion://workflow/production/start or specialist guides) and browse templates/skills via openmotion_list_templates / openmotion_list_skills / openmotion_get_skill.
    - When a Motion project ("motion-project") is already attached or open in the conversation, edit/trim/refine it in place with openmotion_edit_project instead of creating a duplicate project. Otherwise create editable film projects with openmotion_create_project, edit HTML/CSS/GSAP timelines with openmotion_edit_project, open preview with openmotion_open_preview, manage versions/archives, and optionally queue MP4 exports with openmotion_export_request.
 4. Images, Cinema Videos, Music, Sound Effects & Voiceovers:
    - Inspect configured models and provider availability with openmotion_media_use(action="inspect", modality=...) or openmotion_asset_models(modality=...). Pass modality ("image", "video", or "audio") when checking setup for a specific asset type so an image-only provider does not hide a missing audio/video handoff.
-   - Check provider availability and mediaEntitlement before generating. When no fitting provider is usable for the requested modality (signed out, Free/Go mediaEntitlement "not-included", or rejected key), call openmotion_open_preview with the returned modality-scoped settingsHandoff (target="providers", entry=...) so Studio renders an inline setup/upgrade action card in the chat, explain concisely, and ask the user to reply once done (then re-check with refreshAccount=true). Do not pre-block Plus+ accounts on cached hasBalance; if a generation fails with low balance ("balance is too low" / insufficient_balance), stop without retrying, call openmotion_open_preview(target="providers", entry="agent_media_balance_low"), and ask the user to top up and reply to resume.
-   - Generate reusable assets with openmotion_assets_use(action="generate") (skip redundant text spend-consent prompts when Studio's built-in tool approval gate handles confirmation). Each openmotion_assets_use(action="status", jobId=...) call waits up to ~55s automatically; call action="status" again in sequence until job.state is "completed" or "failed" (NEVER call schedule, timers, or shell sleep, and NEVER end your turn while queued or running). Inspect with action="read" and present with openmotion_present_artifact(kind="asset", assetId=..., versionId=...).
+   - Check provider availability and mediaEntitlement before generating. When no fitting provider is usable for a planned modality (signed out with no API key, Free/Go mediaEntitlement "not-included", or rejected key) — including Game Studio multimodal-first builds unless the user explicitly requested pure-code output — you MUST call openmotion_open_preview with the returned modality-scoped settingsHandoff (target="providers", entry=...) so Studio renders an inline sign-in/upgrade action card in the chat (and present upgrade.url if returned for Free/Go, explicitly informing signed-in Free/Go users that multimodal generation requires subscribing to OpenDesign Plus), explain concisely, and ask the user to reply once done (then re-check with refreshAccount=true; in Game Studio also offer building a code-placeholder prototype first). Do not pre-block Plus+ accounts on cached hasBalance; if a generation fails with low balance ("balance is too low" / insufficient_balance), stop without retrying, call openmotion_open_preview(target="providers", entry="agent_media_balance_low"), and ask the user to top up and reply to resume.
+   - Generate reusable assets with openmotion_assets_use(action="generate") (Studio's built-in generation approval gate prompts the user before billed generation executes—even in auto mode, until the user explicitly chooses Always allow for generation—so skip redundant text spend-consent prompts inside Studio when the asset plan is already clear). Each openmotion_assets_use(action="status", jobId=...) call waits up to ~55s automatically; call action="status" again in sequence until job.state is "completed" or "failed" (NEVER call schedule, timers, or shell sleep, and NEVER end your turn while queued or running). Inspect with action="read" and present with openmotion_present_artifact(kind="asset", assetId=..., versionId=...).
    - Never invent completed assets from queued jobs and never automatically resubmit failed paid generations.
 5. Workflows, Batch Content Optimization, Triggers, Captions & Brand Kits:
    - Run multi-step workflows via openmotion_assets_use(action="scenario"), optimize multiple items in parallel via openmotion_assets_use(action="batch"), manage webhooks/schedules via openmotion_assets_use(action="trigger"), transcribe/caption media via openmotion_assets_use(action="transcript"), and reuse Brand Kits via openmotion_assets_use(action="brand_kit") or openmotion_design_catalog(action="get_design_system").
@@ -235,7 +280,7 @@ Rules:
 - Apply the single-player generation scope to game requests in all modes. Do not use a different studio or tool to create a multiplayer game.
 - Do not read credential files or run shell commands to bypass approvals or failed tools.
 - Keep all user-facing communication concise and effortless to scan. When you need user confirmation or a decision mid-task, ask in 1–2 short plain-language sentences with clear numbered options instead of dumping technical jargon or raw JSON.
-- Reply in the user's language. When you create or modify files, code, or artifacts, end with a clear, concise summary covering what was created/changed and how it was verified (never fabricate unexecuted checks). For plain Q&A without edits, answer concisely and directly.`;
+- Reply in the user's language. When you create or modify files, code, or artifacts, end with a clear, concise summary covering what was created/changed (and how it was verified when verification was run — never fabricate unexecuted checks). For plain Q&A without edits, answer concisely and directly.`;
 
 const CODING_AGENT_INSTRUCTIONS = `You are a focused software engineering coding agent inside OpenMotion's Coding workspace (similar to T3 Code).
 Focus strictly on software engineering, debugging, architecture inspection, file editing, shell commands, git workflows, and running tests/builds inside the working directory.
@@ -2207,7 +2252,12 @@ export class SuperAgentConversations {
     meta?: { summary?: string; target?: string },
   ): Promise<boolean> {
     if (active.stopped) return false;
-    if (active.chat.permissionMode === 'auto') return true;
+    // Billed media generation always requires explicit user confirmation unless the user clicked Always allow on a generation approval.
+    if (kind === 'generation') {
+      if (active.chat.generationAutoApproved) return true;
+    } else if (active.chat.permissionMode === 'auto') {
+      return true;
+    }
     const id = randomUUID();
     const pending = new Promise<boolean>(resolve => {
       active.approvals.set(id, resolve);
@@ -2249,13 +2299,25 @@ export class SuperAgentConversations {
 
     const extraResolvers: ((ok: boolean) => void)[] = [];
     if (accepted && alwaysAllow) {
-      active.chat.permissionMode = 'auto';
-      for (const [otherId, resolveOther] of active.approvals.entries()) {
-        active.approvals.delete(otherId);
-        active.approvalMeta?.delete(otherId);
-        extraResolvers.push(resolveOther);
+      if (meta?.kind === 'generation') {
+        active.chat.generationAutoApproved = true;
+        for (const [otherId, resolveOther] of active.approvals.entries()) {
+          if (active.approvalMeta?.get(otherId)?.kind !== 'generation') continue;
+          active.approvals.delete(otherId);
+          active.approvalMeta?.delete(otherId);
+          extraResolvers.push(resolveOther);
+        }
+        active.chat.approvals = active.chat.approvals.filter(item => item.kind !== 'generation');
+      } else {
+        active.chat.permissionMode = 'auto';
+        for (const [otherId, resolveOther] of active.approvals.entries()) {
+          if (active.approvalMeta?.get(otherId)?.kind === 'generation') continue;
+          active.approvals.delete(otherId);
+          active.approvalMeta?.delete(otherId);
+          extraResolvers.push(resolveOther);
+        }
+        active.chat.approvals = active.chat.approvals.filter(item => item.kind === 'generation');
       }
-      active.chat.approvals = [];
     }
 
     if (meta) {
@@ -2619,7 +2681,7 @@ export class SuperAgentConversations {
       },
     );
     active.rpc = rpc;
-    await rpc.request('initialize', {
+    const initialized = await rpc.request('initialize', {
       clientInfo: { name: 'openmotion_super_agent', title: 'OpenMotion Super Agent', version: '1.0.0' },
       capabilities: { experimentalApi: true },
     });
@@ -2629,12 +2691,18 @@ export class SuperAgentConversations {
     }
     rpc.send({ method: 'initialized' });
     const dynamicTools = isCoding && !hasNonBrowserAttachments ? [] : this.buildDynamicTools();
+    const requestedModel = active.chat.model !== 'default' ? active.chat.model : undefined;
+    const requestedEffort = active.chat.reasoning !== 'default' ? active.chat.reasoning : undefined;
+    const signal = active.abortController?.signal;
+    const catalogDefault = requestedModel ? undefined : await pickCodexCatalogModel(rpc, requestedEffort, { signal });
+    if (active.stopped) return;
+    const threadModel = requestedModel ?? catalogDefault?.model;
     const options = {
       cwd,
       approvalPolicy: isCoding && active.chat.permissionMode === 'auto' ? 'never' : 'on-request',
       sandbox: isCoding ? 'workspace-write' : 'read-only',
       developerInstructions: isCoding ? CODING_AGENT_INSTRUCTIONS : SUPER_AGENT_INSTRUCTIONS,
-      ...(active.chat.model && active.chat.model !== 'default' ? { model: active.chat.model } : {}),
+      ...(threadModel ? { model: threadModel } : {}),
     };
     const resumeThreadWithRetry = async () => {
       const retryDelaysMs = [150, 300, 500, 750, 1000];
@@ -2675,11 +2743,19 @@ export class SuperAgentConversations {
     await this.persist(active, true);
     if (active.stopped) return;
 
+    const fallback = result.modelProvider === 'openai'
+      && isCodexBeforeGpt62(initialized?.userAgent)
+      && requiresNewerCodex(threadModel ?? result.model)
+      ? await pickCodexCatalogModel(rpc, requestedEffort, { excludeGpt62: true, signal })
+      : undefined;
+    if (active.stopped) return;
+    active.effectiveModel = (fallback ?? catalogDefault)?.model;
+    const turnModel = fallback?.model ?? threadModel;
     this.updateActivity(active, { phase: 'thinking' }, true);
     const turn = await rpc.request('turn/start', {
       threadId: result.thread.id,
-      ...(active.chat.model && active.chat.model !== 'default' ? { model: active.chat.model } : {}),
-      effort: active.chat.reasoning && active.chat.reasoning !== 'default' ? active.chat.reasoning : null,
+      ...(turnModel ? { model: turnModel } : {}),
+      effort: fallback ? fallback.effort : requestedEffort ?? null,
       input: [{ type: 'text', text: carriedHistory
         ? `<openmotion-compacted-history>\nThis conversation continues in a new Agent session (new tools are available). Earlier messages:\n${carriedHistory}\n</openmotion-compacted-history>\n\n${fullPrompt}`
         : fullPrompt }],
@@ -4559,10 +4635,14 @@ export class SuperAgentConversations {
         const alreadyInChat = Boolean(existing);
         const isReady = gameCard.status === 'ready' || gameCard.status === 'published';
         const revision = String(gameCard.updatedAt || now);
+        // Preserve a localized/custom title set by openmotion_present_artifact when status transitions concurrently.
+        const artifactTitle = name === 'openmotion_game_update_meta'
+          ? gameTitle
+          : (existing?.title && existing.title !== 'Game Project' ? existing.title : gameTitle);
         const artifactDraft: SuperAgentArtifact = {
           id: artifactId,
           kind: 'game-project',
-          title: gameTitle,
+          title: artifactTitle,
           subtitle: `${gameCard.genre || 'game'} · ${gameCard.playableAd ? 'Playable ad' : gameCard.multiplayer ? 'Multiplayer' : 'Game Studio'}`,
           playableAd: gameCard.playableAd === true,
           projectId: gameId,
@@ -4710,8 +4790,8 @@ export class SuperAgentConversations {
     }
     const rawEngine = (active.chat.engine || 'unknown').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
     const safeEngine = slug.test(rawEngine) ? rawEngine : 'other';
-    const safeModelId = typeof active.chat.model === 'string' && modelId.test(active.chat.model)
-      ? active.chat.model : undefined;
+    const turnModel = active.effectiveModel ?? active.chat.model;
+    const safeModelId = typeof turnModel === 'string' && modelId.test(turnModel) ? turnModel : undefined;
     const turnOutcome: 'completed' | 'failed' | 'cancelled' = error
       ? 'failed'
       : state === 'cancelled'

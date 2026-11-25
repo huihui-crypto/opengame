@@ -1,0 +1,254 @@
+/* Monetization gate dialog: uses packages/design-system tokens only (Paper Light & Studio Dark). */
+
+.om-mg-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: var(--motion-overlay);
+}
+
+.om-mg-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 121;
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--motion-radius-xl);
+  background: var(--motion-panel);
+  border: 1px solid var(--motion-border-subtle);
+  box-shadow: var(--motion-shadow-lg);
+  color: var(--motion-text);
+  overflow: hidden;
+}
+
+.om-mg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--motion-space-8);
+  padding: var(--motion-space-16) var(--motion-space-16) var(--motion-space-10);
+}
+
+.om-mg-title {
+  margin: 0;
+  font-size: var(--motion-text-heading);
+  font-weight: var(--motion-weight-semibold);
+  color: var(--motion-text);
+}
+
+.om-mg-close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--motion-radius-md);
+  background: transparent;
+  color: var(--motion-muted);
+}
+
+.om-mg-close:hover {
+  background: var(--motion-hover);
+  color: var(--motion-text);
+}
+
+.om-mg-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--motion-space-12);
+  padding: var(--motion-space-4) var(--motion-space-16) var(--motion-space-14);
+  overflow: auto;
+}
+
+.om-mg-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--motion-space-10);
+  padding: var(--motion-space-14);
+  border-radius: var(--motion-radius-xl);
+  background: var(--motion-inset);
+}
+
+.om-mg-card[data-tone="warning"] {
+  background: color-mix(in srgb, var(--motion-warning) 10%, var(--motion-inset));
+}
+
+.om-mg-card[data-tone="danger"] {
+  background: color-mix(in srgb, var(--motion-danger) 10%, var(--motion-inset));
+}
+
+.om-mg-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--motion-space-6);
+}
+
+.om-mg-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--motion-space-4);
+  padding: 2px var(--motion-space-8);
+  border-radius: var(--motion-radius-full);
+  background: color-mix(in srgb, var(--motion-text) 8%, transparent);
+  color: var(--motion-text);
+  font-size: var(--motion-text-xs);
+  font-weight: var(--motion-weight-medium);
+}
+
+.om-mg-pill[data-tone="warning"] {
+  background: color-mix(in srgb, var(--motion-warning) 18%, transparent);
+  color: var(--motion-warning);
+}
+
+.om-mg-pill[data-tone="danger"] {
+  background: color-mix(in srgb, var(--motion-danger) 18%, transparent);
+  color: var(--motion-danger);
+}
+
+.om-mg-pill[data-tone="accent"] {
+  background: color-mix(in srgb, var(--motion-accent) 18%, transparent);
+  color: var(--motion-accent);
+}
+
+.om-mg-copy {
+  margin: 0;
+  font-size: var(--motion-text-sm);
+  line-height: 1.5;
+  color: var(--motion-text);
+}
+
+.om-mg-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--motion-space-8);
+}
+
+.om-mg-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--motion-space-8) var(--motion-space-10);
+  border-radius: var(--motion-radius-lg);
+  background: var(--motion-panel);
+}
+
+.om-mg-metric span {
+  font-size: var(--motion-text-xs);
+  color: var(--motion-muted);
+}
+
+.om-mg-metric strong {
+  font-size: var(--motion-text-md);
+  font-weight: var(--motion-weight-semibold);
+  color: var(--motion-text);
+}
+
+.om-mg-perks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--motion-space-6);
+  padding: var(--motion-space-12) var(--motion-space-14);
+  border-radius: var(--motion-radius-xl);
+  background: var(--motion-inset);
+}
+
+.om-mg-perks-title {
+  margin: 0;
+  font-size: var(--motion-text-xs);
+  font-weight: var(--motion-weight-semibold);
+  color: var(--motion-muted);
+}
+
+.om-mg-perks-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--motion-space-6);
+  font-size: var(--motion-text-sm);
+  color: var(--motion-text);
+}
+
+.om-mg-perks-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--motion-space-8);
+}
+
+.om-mg-perks-list li svg {
+  flex: none;
+  color: var(--motion-accent);
+}
+
+.om-mg-status {
+  display: flex;
+  align-items: center;
+  gap: var(--motion-space-8);
+  padding: var(--motion-space-10) var(--motion-space-12);
+  border-radius: var(--motion-radius-lg);
+  font-size: var(--motion-text-xs);
+  color: var(--motion-text);
+  background: color-mix(in srgb, var(--motion-accent) 12%, var(--motion-inset));
+}
+
+.om-mg-status[data-tone="success"] {
+  background: color-mix(in srgb, var(--motion-success) 14%, var(--motion-inset));
+  color: var(--motion-success);
+}
+
+.om-mg-inline-btn {
+  margin-left: auto;
+  height: auto;
+  padding: 2px var(--motion-space-8);
+  border-radius: var(--motion-radius-md);
+  background: var(--motion-panel);
+  color: var(--motion-text);
+  font-size: var(--motion-text-xs);
+}
+
+.om-mg-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--motion-space-8);
+  padding: var(--motion-space-12) var(--motion-space-16) var(--motion-space-16);
+  border-top: 1px solid var(--motion-border-subtle);
+}
+
+.om-mg-secondary,
+.om-mg-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--motion-space-6);
+  height: var(--motion-control);
+  padding: 0 var(--motion-space-14);
+  border: 0;
+  border-radius: var(--motion-radius-md);
+  font-size: var(--motion-text-sm);
+  font-weight: var(--motion-weight-medium);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.om-mg-secondary {
+  background: color-mix(in srgb, var(--motion-text) 8%, transparent);
+  color: var(--motion-text);
+}
+
+.om-mg-secondary:hover {
+  background: color-mix(in srgb, var(--motion-text) 12%, transparent);
+}
+
+.om-mg-primary {
+  background: var(--motion-action);
+  color: var(--motion-on-action);
+}
+
+.om-mg-primary:hover {
+  background: var(--motion-action-hover);
+}

@@ -1,0 +1,232 @@
+// @vitest-environment happy-dom
+import { act, useState } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { NEW_VIEWER_TAB_ID, type SuperAgentArtifact } from '../../../shared/super-agent';
+import { I18nProvider } from '../i18n/I18n';
+import * as diagnostics from '../motion/diagnostics';
+import {
+  ArtifactBrowserPane,
+  EXTERNAL_IFRAME_REVEAL_TIMEOUT_MS,
+} from './ArtifactBrowserPane';
+
+vi.mock('../components/WebPublishPopover', () => ({
+  WebPublishPopover: () => null,
+}));
+
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const EXTERNAL_TENNIS: SuperAgentArtifact = {
+  id: 'game:community-tennis-go-wild',
+  kind: 'game-project',
+  title: 'Tennis (Go Wild)',
+  url: 'https://tennis.sixfingerpunch.com/',
+  createdAt: 1000,
+  updatedAt: 1000,
+  presentedAt: 1000,
+};
+
+const EXTERNAL_EVENSONG: SuperAgentArtifact = {
+  id: 'game:community-evensong',
+  kind: 'game-project',
+  title: 'Evensong',
+  url: 'https://evensong-phi.vercel.app/',
+  createdAt: 1001,
+  updatedAt: 1001,
+  presentedAt: 1001,
+};
+
+const LOCAL_GAME: SuperAgentArtifact = {
+  id: 'game:ball-match',
+  kind: 'game-project',
+  projectId: 'ball-match',
+  title: 'Ball Match',
+  url: '/motion-api/games/ball-match/play/index.html',
+  createdAt: 1002,
+  updatedAt: 1002,
+  presentedAt: 1002,
+};
+
+let container: HTMLDivElement;
+let root: Root;
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    new Response(JSON.stringify({ games: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+});
+
+afterEach(() => {
+  act(() => {
+    root.unmount();
+  });
+  container.remove();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+async function renderViewer(artifacts: SuperAgentArtifact[], initialTabId = artifacts[0].id) {
+  const noop = () => {};
+  function Harness() {
+    const [activeTabId, setActiveTabId] = useState(initialTabId);
+    return (
+      <ArtifactBrowserPane
+        chatId={null}
+        artifacts={artifacts}
+        openTabIds={artifacts.map(item => item.id)}
+        activeTabId={activeTabId}
+        expanded={false}
+        workspaceItems={[]}
+        onSelectTab={setActiveTabId}
+        onCloseTab={noop}
+        onNewTab={() => setActiveTabId(NEW_VIEWER_TAB_ID)}
+        onOpenWebUrl={noop}
+        onOpenArtifact={setActiveTabId}
+        onOpenResource={noop}
+        onToggleExpand={noop}
+        onClosePane={noop}
+        onAttachArtifact={noop}
+        onOpenInDesignStudio={noop}
+        onOpenInMotionStudio={noop}
+        onOpenInAssets={noop}
+        onOpenInBrandKit={noop}
+      />
+    );
+  }
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <Harness />
+      </I18nProvider>,
+    );
+    await Promise.resolve();
+  });
+}
+
+describe('ArtifactBrowserPane external game iframe reveal', () => {
+  it('reveals slow external game iframes after timeout, shows background progress, logs diagnostic, and clears on load', async () => {
+    vi.spyOn(diagnostics, 'diagnosticsActive').mockReturnValue(true);
+    const recordSpy = vi.spyOn(diagnostics, 'recordBrowserDiagnostic').mockImplementation(() => {});
+
+    await renderViewer([EXTERNAL_TENNIS]);
+
+    expect(container.querySelector('.om-sa-frame-skeleton[data-game-loading]')).not.toBeNull();
+    expect(container.querySelector('.om-sa-viewer-progress')).toBeNull();
+
+    // Still covered just before the reveal timeout.
+    act(() => {
+      vi.advanceTimersByTime(EXTERNAL_IFRAME_REVEAL_TIMEOUT_MS - 100);
+    });
+    expect(container.querySelector('.om-sa-frame-skeleton[data-game-loading]')).not.toBeNull();
+    expect(container.querySelector('.om-sa-viewer-progress')).toBeNull();
+    expect(recordSpy).not.toHaveBeenCalled();
+
+    // Cover dismisses at timeout so already-painted frames become interactive while toolbar progress stays visible.
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    expect(container.querySelector('.om-sa-frame-skeleton[data-game-loading]')).toBeNull();
+    expect(container.querySelector('.om-sa-viewer-progress')).not.toBeNull();
+    expect(recordSpy).toHaveBeenCalledTimes(1);
+    expect(recordSpy).toHaveBeenCalledWith(
+      'activity_iframe_slow',
+      `game=community-tennis-go-wild host=tennis.sixfingerpunch.com revealAfterMs=${EXTERNAL_IFRAME_REVEAL_TIMEOUT_MS}`,
+      '',
+      expect.stringContaining('iframe-slow:'),
+    );
+
+    // Late window.load clears the toolbar progress bar.
+    const iframe = container.querySelector<HTMLIFrameElement>('iframe[title="Tennis (Go Wild)"]')!;
+    act(() => {
+      iframe.dispatchEvent(new Event('load'));
+    });
+    expect(container.querySelector('.om-sa-viewer-progress')).toBeNull();
+  });
+
+  it('cancels the reveal timeout and skips slow diagnostics when an external game loads promptly', async () => {
+    vi.spyOn(diagnostics, 'diagnosticsActive').mockReturnValue(true);
+    const recordSpy = vi.spyOn(diagnostics, 'recordBrowserDiagnostic').mockImplementation(() => {});
+
+    await renderViewer([EXTERNAL_EVENSONG]);
+
+    const iframe = container.querySelector<HTMLIFrameElement>('iframe[title="Evensong"]')!;
+    act(() => {
+      vi.advanceTimersByTime(500);
+      iframe.dispatchEvent(new Event('load'));
+    });
+
+    expect(container.querySelector('.om-sa-frame-skeleton[data-game-loading]')).toBeNull();
+    expect(container.querySelector('.om-sa-viewer-progress')).toBeNull();
+
+    act(() => {
+      vi.advanceTimersByTime(EXTERNAL_IFRAME_REVEAL_TIMEOUT_MS * 2);
+    });
+    expect(container.querySelector('.om-sa-viewer-progress')).toBeNull();
+    expect(recordSpy).not.toHaveBeenCalled();
+  });
+
+  it('resets the loading cover and timer when reloading the same external game URL', async () => {
+    await renderViewer([EXTERNAL_TENNIS]);
+
+    act(() => {
+      vi.advanceTimersByTime(EXTERNAL_IFRAME_REVEAL_TIMEOUT_MS);
+    });
+    expect(container.querySelector('.om-sa-frame-skeleton[data-game-loading]')).toBeNull();
+    expect(container.querySelector('.om-sa-viewer-progress')).not.toBeNull();
+
+    const reloadBtn = container.querySelector<HTMLButtonElement>('button[aria-label="Reload"]')!;
+    act(() => {
+      reloadBtn.click();
+    });
+
+    // Reload mounts a fresh iframe with the same URL: cover returns and background progress resets.
+    expect(container.querySelector('.om-sa-frame-skeleton[data-game-loading]')).not.toBeNull();
+    expect(container.querySelector('.om-sa-viewer-progress')).toBeNull();
+
+    act(() => {
+      vi.advanceTimersByTime(EXTERNAL_IFRAME_REVEAL_TIMEOUT_MS);
+    });
+    expect(container.querySelector('.om-sa-frame-skeleton[data-game-loading]')).toBeNull();
+    expect(container.querySelector('.om-sa-viewer-progress')).not.toBeNull();
+  });
+
+  it('clears background progress when switching away from a slow external game tab', async () => {
+    await renderViewer([EXTERNAL_TENNIS, EXTERNAL_EVENSONG]);
+
+    act(() => {
+      vi.advanceTimersByTime(EXTERNAL_IFRAME_REVEAL_TIMEOUT_MS);
+    });
+    expect(container.querySelector('.om-sa-viewer-progress')).not.toBeNull();
+
+    const tabs = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    act(() => {
+      tabs[1].click();
+    });
+    expect(container.querySelector('.om-sa-viewer-progress')).toBeNull();
+    expect(container.querySelector('.om-sa-frame-skeleton[data-game-loading]')).not.toBeNull();
+  });
+
+  it('does not apply the external reveal timeout to local workspace games', async () => {
+    await renderViewer([LOCAL_GAME]);
+
+    expect(container.querySelector('.om-sa-frame-skeleton[data-game-loading]')).not.toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(EXTERNAL_IFRAME_REVEAL_TIMEOUT_MS * 3);
+    });
+    expect(container.querySelector('.om-sa-frame-skeleton[data-game-loading]')).not.toBeNull();
+    expect(container.querySelector('.om-sa-viewer-progress')).toBeNull();
+
+    const iframe = container.querySelector<HTMLIFrameElement>('iframe[title="Ball Match"]')!;
+    act(() => {
+      iframe.dispatchEvent(new Event('load'));
+    });
+    expect(container.querySelector('.om-sa-frame-skeleton[data-game-loading]')).toBeNull();
+  });
+});

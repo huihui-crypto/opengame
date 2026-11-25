@@ -217,8 +217,24 @@ export function reportSettingsClick(area: SettingsClickArea, element: Click['ele
   send('ui_click', { ...settingsPage, area, element, ...rest, ...(entry ? { entry_from: entry } : {}), ...(provider ? providerFields(provider) : {}), ...slugField('agent_id', agent) });
 }
 export function reportEntitlementGateView(page: NonNullable<Fields<'surface_view'>['page_name']>, hookId: EntitlementHookId,
-  extra: Pick<Fields<'surface_view'>, 'publish_target' | 'studio_id'> = {}) {
+  extra: Pick<Fields<'surface_view'>, 'publish_target' | 'studio_id' | 'entry_id' | 'campaign_id'> = {}) {
   send('surface_view', { page_name: page, area: 'entitlement_gate', element: 'gate_card', hook_id: hookId, ...extra });
+}
+export function reportEntitlementModalView(page: NonNullable<Fields<'surface_view'>['page_name']>, hookId: EntitlementHookId,
+  extra: Pick<Fields<'surface_view'>, 'studio_id' | 'entry_id' | 'campaign_id' | 'game_id'> = {}) {
+  send('surface_view', { page_name: page, area: 'entitlement_modal', element: 'modal', hook_id: hookId, ...extra });
+}
+export function reportEntitlementModalClick(page: NonNullable<Fields<'ui_click'>['page_name']>,
+  element: Extract<Click['element'], 'open_pricing' | 'close_modal' | 'check_balance' | 'start_sign_in'>,
+  hookId: EntitlementHookId,
+  extra: Pick<Click, 'entry_id' | 'studio_id' | 'campaign_id' | 'game_id' | 'publish_target'> = {}) {
+  send('ui_click', { page_name: page, area: 'entitlement_modal', element, hook_id: hookId, ...extra });
+}
+export function reportEntitlementGateClick(page: NonNullable<Fields<'ui_click'>['page_name']>,
+  element: Extract<Click['element'], 'open_pricing' | 'start_sign_in'>,
+  hookId: EntitlementHookId,
+  extra: Pick<Click, 'entry_id' | 'studio_id' | 'campaign_id' | 'publish_target'> = {}) {
+  send('ui_click', { page_name: page, area: 'entitlement_gate', element, hook_id: hookId, ...extra });
 }
 export function reportEntitlementRefresh(page: NonNullable<Fields<'entitlement_refresh_result'>['page_name']>,
   hookId: EntitlementHookId, entryId: string | undefined, outcome: 'success' | 'failure', planChanged: boolean) {

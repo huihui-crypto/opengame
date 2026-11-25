@@ -403,3 +403,48 @@ test('surgical editing, readable source formatting and template adaptation stay 
   assert.match(adaptation.content, /Hard cap[\s\S]*Approximate target|Approximate target[\s\S]*Hard cap/);
   assert.match(adaptation.content, /Narration\/TTS precedence/);
 });
+
+test('openmotion-game prioritizes multimodal discovery, 3-view->3D slot, and mandatory sign-in/subscription onboarding', async () => {
+  const { gameAssetInstructions } = await import('../shared/game-contract.ts');
+  const gameStart = await getWorkflow('start', 'game');
+  const discoverIndex = gameStart.content.indexOf('Discover live capabilities first');
+  const recoveryIndex = gameStart.content.indexOf('Unavailable, plan-gated, or low-balance recovery');
+  assert.ok(discoverIndex > 0, 'openmotion-game SKILL.md must start multimodal routing with live capability discovery');
+  assert.ok(recoveryIndex > discoverIndex, 'unavailable/plan-gated recovery must follow live capability discovery');
+  assert.doesNotMatch(gameStart.content, /Pure-code & Playable Ad boundary/);
+  assert.doesNotMatch(gameStart.content, /no-nag setup boundary/);
+  assert.doesNotMatch(gameStart.content, /ignore `settingsHandoff`/);
+  assert.match(gameStart.content, /3-view turnaround[\s\S]*Image-to-3D/);
+  assert.match(gameStart.content, /agent_media_signed_out[\s\S]*\*\*must\*\* call `openmotion_open_preview`/);
+  assert.match(gameStart.content, /agent_media_upgrade_free[\s\S]*agent_media_upgrade_go[\s\S]*\*\*must\*\* call `openmotion_open_preview`/);
+  assert.match(gameStart.content, /\*\*Audio & BGM\*\*[\s\S]*game-audio\.md/);
+  assert.match(gameStart.content, /BGM-only generation does not upgrade/);
+
+  // Shared gameAssetInstructions stays aligned with SKILL.md (read-only discovery first + mandatory sign-in/subscription handoff)
+  assert.doesNotMatch(gameAssetInstructions, /Pure code-driven gameplay-first games.*without calling/);
+  assert.doesNotMatch(gameAssetInstructions, /do not call openmotion_open_preview/);
+  assert.match(gameAssetInstructions, /read-only live capability discovery first/);
+  assert.match(gameAssetInstructions, /orthographic 3-view turnaround images into Image-to-3D/);
+  assert.match(gameAssetInstructions, /agent_media_signed_out.*MUST call openmotion_open_preview/);
+  assert.match(gameAssetInstructions, /agent_media_upgrade_free.*agent_media_upgrade_go.*MUST call openmotion_open_preview/);
+  assert.match(gameAssetInstructions, /requires subscribing to OpenDesign Plus/);
+  assert.match(gameAssetInstructions, /looping BGM/);
+
+  const anim3d = await getWorkflow('animation', 'game');
+  assert.match(anim3d.content, /orthographic 3-view turnaround/);
+
+  const playable = await getWorkflow('playable', 'game');
+  assert.match(playable.content, /looping background music bed/);
+  assert.match(playable.content, /\/motion-api\/assets\/<assetId>\/versions\/<versionId>\/media/);
+  assert.match(playable.content, /Audio & looping BGM/);
+  assert.doesNotMatch(playable.content, /A quiet 8–16 bar loop is optional/);
+  assert.doesNotMatch(playable.content, /One self-contained file/);
+
+  const audio = await getWorkflow('audio', 'game');
+  assert.match(audio.content, /"action":"inspect","modality":"audio"/);
+  assert.match(audio.content, /## Web Audio BGM fallback/);
+  assert.match(audio.content, /ctx\.currentTime/);
+
+  const rubric = await getWorkflow('review', 'game');
+  assert.match(rubric.content, /looping BGM/);
+});

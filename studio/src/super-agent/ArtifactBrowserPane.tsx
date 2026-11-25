@@ -51,6 +51,7 @@ import {
   storedInstruction,
 } from '../motion/game/gameCatalog';
 import { isMultiplayerGameArtifact } from '../motion/game/gameSuperAgent';
+import { diagnosticsActive, recordBrowserDiagnostic } from '../motion/diagnostics';
 import { lazyWithChunkReload, preloadableLazyWithChunkReload } from '../utils/chunkReload';
 import { releaseMediaElement } from '../utils/releaseMediaElement';
 import {
@@ -347,6 +348,8 @@ function groupProjectFiles(files: string[]) {
   return { rootFiles, folders };
 }
 
+export const EXTERNAL_IFRAME_REVEAL_TIMEOUT_MS = 3500;
+
 function ProjectPreviewCodeView({
   frameKey,
   title,
@@ -367,6 +370,9 @@ function ProjectPreviewCodeView({
   iframeRef,
   onIframeLoad,
   loadingBrand = false,
+  revealTimeoutMs,
+  onRevealTimeout,
+  onBackgroundLoadingChange,
   overlay,
 }: {
   frameKey: string;
@@ -388,16 +394,50 @@ function ProjectPreviewCodeView({
   iframeRef?: RefObject<HTMLIFrameElement | null>;
   onIframeLoad?: () => void;
   loadingBrand?: boolean;
+  revealTimeoutMs?: number;
+  onRevealTimeout?: () => void;
+  onBackgroundLoadingChange?: (loading: boolean) => void;
   overlay?: ReactNode;
 }) {
   const { t } = useI18n();
-  const [frameLoaded, setFrameLoaded] = useState(false);
+  const frameIdentity = `${frameKey}\0${previewUrl}\0${srcDoc ?? ''}`;
+  const [loadedFrameIdentity, setLoadedFrameIdentity] = useState<string | null>(null);
+  const [revealedFrameIdentity, setRevealedFrameIdentity] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [copiedCode, setCopiedCode] = useState(false);
+  const onRevealTimeoutRef = useRef(onRevealTimeout);
+  onRevealTimeoutRef.current = onRevealTimeout;
+  const onBackgroundLoadingChangeRef = useRef(onBackgroundLoadingChange);
+  onBackgroundLoadingChangeRef.current = onBackgroundLoadingChange;
+
+  const hasFrameSource = mode === 'preview' && Boolean(previewUrl || srcDoc);
+  const frameLoaded = hasFrameSource && loadedFrameIdentity === frameIdentity;
+  const frameRevealTimedOut = hasFrameSource && revealedFrameIdentity === frameIdentity;
 
   useEffect(() => {
-    setFrameLoaded(false);
-  }, [previewUrl, srcDoc]);
+    if (mode !== 'preview') {
+      setLoadedFrameIdentity(null);
+      setRevealedFrameIdentity(null);
+    }
+  }, [mode]);
+
+  useEffect(() => {
+    if (!hasFrameSource || frameLoaded || frameRevealTimedOut || !revealTimeoutMs || revealTimeoutMs <= 0) return;
+    const timer = window.setTimeout(() => {
+      setRevealedFrameIdentity(frameIdentity);
+      onRevealTimeoutRef.current?.();
+    }, revealTimeoutMs);
+    return () => window.clearTimeout(timer);
+  }, [hasFrameSource, frameLoaded, frameRevealTimedOut, revealTimeoutMs, frameIdentity]);
+
+  const backgroundLoading = hasFrameSource && !frameLoaded && frameRevealTimedOut;
+
+  useEffect(() => {
+    onBackgroundLoadingChangeRef.current?.(backgroundLoading);
+    return () => {
+      onBackgroundLoadingChangeRef.current?.(false);
+    };
+  }, [backgroundLoading]);
 
   useEffect(() => {
     setCopiedCode(false);
@@ -581,7 +621,7 @@ function ProjectPreviewCodeView({
   return (
     <div className="om-sa-iframe-stage" data-viewport={viewport}>
       <div className="om-sa-iframe-frame" ref={frameRef} style={frameStyle}>
-        {!frameLoaded && (previewUrl || srcDoc) && (
+        {!frameLoaded && !frameRevealTimedOut && (previewUrl || srcDoc) && (
           <div
             className="om-sa-frame-skeleton"
             data-game-loading={loadingBrand || undefined}
@@ -604,7 +644,7 @@ function ProjectPreviewCodeView({
           sandbox={sandbox}
           {...(allow ? { allow } : {})}
           onLoad={() => {
-            setFrameLoaded(true);
+            setLoadedFrameIdentity(frameIdentity);
             onIframeLoad?.();
           }}
         />
@@ -936,6 +976,7 @@ function GameProjectArtifactView({
   onCloseAnnotate,
   onNotify,
   onGameMeta,
+  onBackgroundLoadingChange,
 }: {
   artifact: SuperAgentArtifact;
   chatId: string | null;
@@ -952,6 +993,7 @@ function GameProjectArtifactView({
   onCloseAnnotate: () => void;
   onNotify?: (message: string, tone?: 'info' | 'error') => void;
   onGameMeta?: (meta: { trailerUrl: string | null; source: GameCard['source'] | null; multiplayer: boolean }) => void;
+  onBackgroundLoadingChange?: (loading: boolean) => void;
 }) {
   const { t } = useI18n();
   const projectId = artifact.projectId || '';
@@ -1209,9 +1251,11 @@ function GameProjectArtifactView({
     );
   }
 
+  const frameKey = `${projectId || artifact.id}:${artifact.revision ?? ''}:${presentedKey}:${reloadKey}`;
+
   return (
     <ProjectPreviewCodeView
-      frameKey={`${projectId || artifact.id}:${artifact.revision ?? ''}:${presentedKey}:${reloadKey}`}
+      frameKey={frameKey}
       title={artifact.title}
       previewUrl={isExternalGame || bundledBlobUrl ? previewUrl : (bridge.bridgedPreviewUrl || previewUrl)}
       sandbox={
@@ -1239,6 +1283,28 @@ function GameProjectArtifactView({
         }
       }}
       loadingBrand
+      revealTimeoutMs={isExternalGame ? EXTERNAL_IFRAME_REVEAL_TIMEOUT_MS : undefined}
+      onRevealTimeout={isExternalGame ? () => {
+        if (pendingFrameFocusRef.current) {
+          pendingFrameFocusRef.current = false;
+          focusGameFrame();
+        }
+        if (diagnosticsActive()) {
+          let host = 'external';
+          try {
+            host = new URL(previewUrl).host || host;
+          } catch {
+            // Keep generic host fallback when the URL is malformed.
+          }
+          recordBrowserDiagnostic(
+            'activity_iframe_slow',
+            `game=${artifactGameId || artifact.id} host=${host} revealAfterMs=${EXTERNAL_IFRAME_REVEAL_TIMEOUT_MS}`,
+            '',
+            `iframe-slow:${frameKey}`,
+          );
+        }
+      } : undefined}
+      onBackgroundLoadingChange={onBackgroundLoadingChange}
       overlay={annotateActive && Boolean(projectId) && effectiveMode === 'preview' ? (
         <BrowserAnnotationOverlay
           mode="game-iframe"
@@ -1790,6 +1856,7 @@ export function ArtifactBrowserPane({
   const [viewMode, setViewMode] = useState<'preview' | 'code' | 'trailer'>('preview');
   const [gameTrailerUrl, setGameTrailerUrl] = useState<string | null>(null);
   const [gameSourceKind, setGameSourceKind] = useState<GameCard['source'] | null>(null);
+  const [gameFrameBackgroundLoading, setGameFrameBackgroundLoading] = useState(false);
   const [multiplayerArtifactId, setMultiplayerArtifactId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<DesignViewportId>('desktop');
   const [reloadKey, setReloadKey] = useState(0);
@@ -1881,6 +1948,7 @@ export function ArtifactBrowserPane({
       setConsoleFilter('all');
       setGameTrailerUrl(null);
       setGameSourceKind(null);
+      setGameFrameBackgroundLoading(false);
       setMotionSnapshot(null);
     }
     if (!activeArtifact) {
@@ -2185,6 +2253,8 @@ export function ArtifactBrowserPane({
   };
 
   const webLoading = Boolean(pendingWebUrl) || Boolean(activeArtifact?.kind === 'web' && webState?.loading);
+  const viewerProgressLoading = webLoading
+    || Boolean(!showNewTab && activeArtifact?.kind === 'game-project' && gameFrameBackgroundLoading);
 
   useEffect(() => {
     if (activeArtifact?.kind === 'web' && webState?.url && !addressEditing) {
@@ -2212,7 +2282,7 @@ export function ArtifactBrowserPane({
 
   const normalizedNewTabQuery = newTabQuery.trim();
   const displaySubtitle = (item: SuperAgentArtifact | SuperAgentResourceAttachment) =>
-    isPlayableAdArtifact(item) ? t('Playable ad') : item.subtitle;
+    isPlayableAdArtifact(item) ? t('Ad-revenue game') : item.subtitle;
   const searchableSubtitle = (item: SuperAgentArtifact | SuperAgentResourceAttachment) =>
     `${item.subtitle ?? ''} ${displaySubtitle(item) ?? ''}`;
 
@@ -3229,7 +3299,7 @@ export function ArtifactBrowserPane({
             </Popover>
           )}
         </div>
-        {webLoading && <div className="om-sa-viewer-progress" role="progressbar" aria-label={t('Loading…')} />}
+        {viewerProgressLoading && <div className="om-sa-viewer-progress" role="progressbar" aria-label={t('Loading…')} />}
       </div>
 
       <div className="om-sa-viewer-stage" data-console={consoleOpen && supportsAnnotate ? 'true' : undefined} data-publish-open={publishPanelOpen || undefined}>
@@ -3493,6 +3563,7 @@ export function ArtifactBrowserPane({
               setGameSourceKind(meta.source);
               setMultiplayerArtifactId(meta.multiplayer ? activeArtifact.id : null);
             }}
+            onBackgroundLoadingChange={setGameFrameBackgroundLoading}
           />
         ) : activeArtifact.kind === 'web' && activeArtifact.url && chatId ? (
           <div className="om-sa-web-stage">

@@ -100,10 +100,10 @@ test('draft lifecycle, remix, persisted local viewer and concurrent counters',()
 
 test('templates are optional, read-only and remix into independent owned files',()=>fixture(async(service,workspace)=>{
   const {game}=await service.create(brief),template=path.join(service.templates,'racer');
-  await mkdir(template,{recursive:true}); await writeFile(path.join(template,'game.json'),JSON.stringify({...game,id:'racer',status:'published',source:'template',tags:['top赚钱']}));
+  await mkdir(template,{recursive:true}); await writeFile(path.join(template,'game.json'),JSON.stringify({...game,id:'racer',status:'published',source:'template',tags:['TOP赚钱']}));
   await writeFile(path.join(template,'index.html'),'<title>Template</title>');
   assert.equal((await service.get('racer')).source,'template');
-  assert.deepEqual((await service.get('racer')).tags,['top赚钱']);
+  assert.deepEqual((await service.get('racer')).tags,['TOP赚钱']);
   const raw=JSON.parse(await readFile(path.join(template,'game.json'),'utf8')); raw.cover='cover.png'; delete raw.remixOf; await writeFile(path.join(template,'game.json'),JSON.stringify(raw));
   assert.equal((await service.get('racer')).cover,'/api/games/racer/play/cover.png'); assert.equal((await service.get('racer')).remixOf,null);
   await assert.rejects(service.write('racer',[{path:'index.html',content:'bad'}]),/not found/);
@@ -411,11 +411,28 @@ test('portrait briefs are stored and told to the Agent; invalid orientation is r
 
 test('playable-ad briefs are portrait single-player only and carry the ad recipe to the Agent',()=>fixture(async(_,workspace)=>{
   const {service}=await fakeKits(workspace);
-  const {game}=await service.create({...brief,orientation:'portrait',playableAd:true});
+  const {game,agentInstruction}=await service.create({...brief,orientation:'portrait',playableAd:true});
   assert.equal(game.playableAd,true);
+  assert.doesNotMatch(agentInstruction,/inline in index\.html/i);
+  assert.doesNotMatch(agentInstruction,/loads nothing from the network/i);
+  assert.match(agentInstruction,/openmotion_media_use/);
   const stored=JSON.parse(await readFile(path.join(service.root,game.id,'game.json'),'utf8'));
   assert.match(stored.rawPrompt,/portrait 9:16 phone game/);
   assert.match(stored.rawPrompt,/Format: playable ad/);
+  // Handoff refreshes legacy stored playable-ad suffixes so resumed drafts inherit the current unified media guidance.
+  const metaPath=path.join(service.root,game.id,'game.json');
+  await writeFile(metaPath,JSON.stringify({...stored,rawPrompt:`${brief.prompt}\n\nFormat: playable ad. Follow the playable-ad recipe in the openmotion-game skill (references/game-playable-ad.md): one self-contained HTML that loads nothing from the network.`}));
+  const handoff=await service.handoff(game.id);
+  assert.doesNotMatch(handoff.agentInstruction,/loads nothing from the network/i);
+  assert.doesNotMatch(handoff.agentInstruction,/inline in index\.html/i);
+  assert.match(handoff.agentInstruction,/openmotion_media_use/);
+  // Direct same-orientation remix of a legacy playable ad also refreshes the stored suffix and instruction.
+  const legacyRemix=await service.remix(game.id);
+  assert.doesNotMatch(legacyRemix.agentInstruction,/loads nothing from the network/i);
+  assert.doesNotMatch(legacyRemix.agentInstruction,/inline in index\.html/i);
+  assert.match(legacyRemix.agentInstruction,/openmotion_media_use/);
+  const legacyRemixStored=JSON.parse(await readFile(path.join(service.root,legacyRemix.game.id,'game.json'),'utf8'));
+  assert.doesNotMatch(legacyRemixStored.rawPrompt,/loads nothing from the network/i);
   // Landscape or multiplayer briefs ignore the flag rather than building a broken ad.
   const wide=await service.create({...brief,orientation:'landscape',playableAd:true});assert.equal(wide.game.playableAd,undefined);
   const party=await service.create({...brief,multiplayer:true,orientation:'portrait',playableAd:true});assert.equal(party.game.playableAd,undefined);
@@ -1483,4 +1500,71 @@ test('remix persists optional genre/style/setting/orientation overrides on the g
   assert.equal(emptyRemix.status,201);
   const invalidRemix=await httpCall(port,'POST',`/api/games/${created.game.id}/remix`,{orientation:'square'});
   assert.equal(invalidRemix.status,400);
+}));
+
+test('built-in published template remixes keep a clean title and emit dual-path instant-delivery vs in-place-edit instructions',()=>fixture(async(service)=>{
+  const {game:draft}=await service.create({...brief,genre:'casual',style:'3d',setting:'modern',orientation:'portrait',prompt:'Trace glossy chains to pop clusters'});
+  const templateDir=path.join(service.templates,'ball-match');
+  await mkdir(templateDir,{recursive:true});
+  await writeFile(path.join(templateDir,'game.json'),JSON.stringify({
+    ...draft,
+    id:'ball-match',
+    title:'Jelly Ball Chain Pop',
+    description:'Trace glossy chains to pop clusters.',
+    controls:'Drag across adjacent matching balls to pop.',
+    status:'published',
+    source:'template',
+    cover:'cover.webp',
+    i18n:{'zh-CN':{title:'弹珠连线爆爆乐',description:'一指划过彩球连消。',controls:'拖动相邻同色彩球消除。'}},
+  }));
+  await writeFile(path.join(templateDir,'index.html'),'<!doctype html><title>Ball Match</title>');
+  await writeFile(path.join(templateDir,'cover.webp'),Buffer.from('fake'));
+
+  // Plain built-in template remix (no overrides)
+  const plain=await service.remix('ball-match');
+  assert.equal(plain.game.title,'Jelly Ball Chain Pop');
+  assert.equal(plain.game.status,'draft');
+  assert.equal(plain.game.remixOf,'ball-match');
+  assert(!('pristineTemplateCopy' in plain.game));
+  assert.match(plain.agentInstruction,/complete, playable built-in template/);
+  assert.match(plain.agentInstruction,/deliver immediately with zero rebuild/);
+  assert.match(plain.agentInstruction,/never mention templates, copying source files/i);
+  assert.match(plain.agentInstruction,/User-facing voice \(applies to BOTH paths above\)/);
+  assert.match(plain.agentInstruction,/openmotion_game_read_file/);
+  assert.doesNotMatch(plain.agentInstruction,/Explicit parameter overrides vs template defaults/);
+  assert.equal((await service.handoff(plain.game.id)).agentInstruction,plain.agentInstruction);
+
+  // Once a template copy's files are edited (even while still in draft), handoff must fall back to the full build/verify workflow.
+  await service.write(plain.game.id,[{path:'index.html',content:'<!doctype html><title>Half-edited</title>'}]);
+  assert.equal((await service.get(plain.game.id)).status,'draft');
+  const editedHandoff=await service.handoff(plain.game.id);
+  assert.doesNotMatch(editedHandoff.agentInstruction,/deliver immediately with zero rebuild/);
+  assert.match(editedHandoff.agentInstruction,/Use the openmotion-game Skill to remix game/);
+
+  // Built-in template remix with explicit parameter overrides
+  const overridden=await service.remix('ball-match',{style:'pixel',orientation:'landscape'});
+  assert.equal(overridden.game.title,'Jelly Ball Chain Pop');
+  assert.match(overridden.agentInstruction,/Explicit parameter overrides vs template defaults: style=pixel \(template: 3d\), orientation=landscape \(template: portrait\)/);
+  assert.equal((await service.handoff(overridden.game.id)).agentInstruction,overridden.agentInstruction);
+
+  // Transitioning a template copy to building or failed also disables the zero-rebuild fast path in handoff().
+  await service.status(overridden.game.id,'failed');
+  const failedHandoff=await service.handoff(overridden.game.id);
+  assert.doesNotMatch(failedHandoff.agentInstruction,/deliver immediately with zero rebuild/);
+  assert.match(failedHandoff.agentInstruction,/Use the openmotion-game Skill to remix game/);
+
+  // Unfinished (draft) template never triggers the built-in template fast path
+  const draftTplDir=path.join(service.templates,'wip-template');
+  await mkdir(draftTplDir,{recursive:true});
+  await writeFile(path.join(draftTplDir,'game.json'),JSON.stringify({...draft,id:'wip-template',title:'WIP Template',status:'draft',source:'template'}));
+  await writeFile(path.join(draftTplDir,'index.html'),'<!doctype html><title>WIP</title>');
+  const wipRemix=await service.remix('wip-template');
+  assert.match(wipRemix.game.title,/ remix$/);
+  assert.doesNotMatch(wipRemix.agentInstruction,/deliver immediately with zero rebuild/);
+
+  // Remixing a user's own mine draft keeps the " remix" suffix and classic build workflow (no instant-delivery fast path)
+  const ownRemix=await service.remix(draft.id);
+  assert.match(ownRemix.game.title,/ remix$/);
+  assert.doesNotMatch(ownRemix.agentInstruction,/deliver immediately with zero rebuild/);
+  assert.match(ownRemix.agentInstruction,/Use the openmotion-game Skill to remix game/);
 }));

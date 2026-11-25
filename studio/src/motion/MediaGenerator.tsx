@@ -11,6 +11,8 @@ import { useToast } from '../hooks/useToast';
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { isStudioSaveErrorAlreadyToasted } from '../utils/studioSaveDiagnostics';
 import { TimelineMediaActionError, timelineMediaActionOutcome } from '../utils/timelineMediaActionError';
+import { detectMonetizationGateFromError, openMonetizationGate } from './monetization/monetizationGateBus';
+import { reportEntitlementGateClick } from './pageTracking';
 import { requestedProject } from './workspaceRouting';
 
 export function generationParameters(model: Model, ratio: string, duration: number, extra: Record<string, unknown>) {
@@ -120,7 +122,12 @@ export function MediaGenerator({ request, onClose, onSettings }: { request: Medi
         setJobs(prev => [job, ...prev.filter(j => j.id !== job.id)]);
       }
       submission.current = null;
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      const gate = detectMonetizationGateFromError(e instanceof Error ? { message: e.message } : { message: msg });
+      if (gate) openMonetizationGate({ ...gate, pageName: 'studio' });
+    }
     finally { setBusy(false); }
   }
   async function runTimelineAction(action: 'place' | 'replace', job: GenerationJob, asset: string) {
@@ -193,7 +200,24 @@ export function MediaGenerator({ request, onClose, onSettings }: { request: Medi
     {data && (!model || !available(model)) && <Button variant="plain" className="motion-media-connect" onClick={onSettings}>{t('Connect a provider to generate this media')}</Button>}
     {visibleJobs.length > 0 && <div className="motion-generation-results" aria-live="polite">{visibleJobs.slice(0, 8).map(job => <article key={job.id}>
       <div className="motion-media-row"><span title={job.prompt}>{job.model.label} <small>{t(job.state)}</small></span>{['queued', 'running'].includes(job.state) && <Button variant="plain" disabled={cancelling.includes(job.id)} aria-busy={cancelling.includes(job.id)} onClick={() => void cancel(job)}>{t('Cancel')}</Button>}</div>
-      {job.error && <p className="motion-media-error">{t(job.error)}</p>}
+      {job.error && (() => {
+        const failedGate = detectMonetizationGateFromError({ message: job.error });
+        return <>
+          <p className="motion-media-error">{t(job.error)}</p>
+          {failedGate && (
+            <Button
+              variant="plain"
+              className="motion-media-connect"
+              onClick={() => {
+                reportEntitlementGateClick('studio', 'open_pricing', 'failure_card_topup');
+                openMonetizationGate({ ...failedGate, pageName: 'studio' });
+              }}
+            >
+              {t('Top up or upgrade')}
+            </Button>
+          )}
+        </>;
+      })()}
       {job.assets.map(asset => <div className="motion-generated-asset" key={asset.path}>
         {asset.available !== false && nativeProjectId && asset.mimeType.startsWith('image/') && <img alt={job.prompt} src={`/api/projects/${encodeURIComponent(nativeProjectId)}/preview/${asset.path}`} />}
         <span><strong>{asset.path.split('/').pop()}</strong><small>{t(asset.available === false ? 'File moved or removed · check the media library' : 'Saved to project assets')}</small></span>

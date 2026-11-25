@@ -80,7 +80,8 @@ export const entitlementHookIds = [
   'settings_subscription', 'studio_free_gate', 'model_picker_upgrade', 'studio_res_gate',
   'failure_card_topup', 'mcp_oauth',
   'model_hub_signin', 'model_hub_upgrade', 'game_publish_signin', 'cloud_share_signin',
-  'super_agent_signin', 'super_agent_upgrade',
+  'balance_gate_topup', 'concurrency_gate_upgrade',
+  'game_publish_panel_signin', 'game_publish_unlisted_upgrade',
 ] as const;
 export type EntitlementHookId = (typeof entitlementHookIds)[number];
 const campaign = { campaign_id: ['black_friday_2026'], entry_id: 'uuid', hook_id: entitlementHookIds } as const;
@@ -204,6 +205,8 @@ export const omEvents = {
     studio_id: creative.studio_id, scene_id: creative.scene_id, model_provider: creative.model_provider, model_id: creative.model_id, explore_community: creative.explore_community, medium: creative.medium, landing: creative.landing, hub_id: modelHub.hub_id, signed_in: modelHub.signed_in }, required: ['page_name', 'view_id', 'embedded', 'has_project'] },
   provider_setup_opened: { producers: ['mcp'], fields: { entry_from: providerSetupEntries, presentation: ['foreground', 'background', 'now'], embedded: 'boolean' },
     required: ['entry_from', 'presentation', 'embedded'] },
+  upgrade_link_result: { producers: ['mcp'], fields: { entry_from: ['agent_media_upgrade_free', 'agent_media_upgrade_go'], entry_id: 'uuid', outcome: ['success', 'failure'] },
+    required: ['entry_from', 'outcome'] },
   studio_load_result: { producers: ['studio'], fields: { load_id: 'uuid', outcome, duration_ms: 'integer', embedded: 'boolean', ...project, ...projectScale, ...template }, required: ['load_id', 'outcome', 'duration_ms', 'embedded'] },
   ui_click: { producers: ['studio'], fields: { page_name: pages,
     area: ['workspace', 'templates', 'template_card', 'template_detail', 'template_instruction', 'template_discovery', 'template_series_card', 'template_series_detail',
@@ -253,7 +256,8 @@ export const omEvents = {
       'open_in_codex', 'open_external', 'reload_game', 'fullscreen_game', 'game_tab', 'open_publish', 'toggle_link_access', 'publish_link', 'new_link', 'copy_publish_link',
       'create_trailer', 'regenerate_trailer', 'open_trailer_project', 'open_game_studio', 'view_all_games',
       'open_palette', 'select_result', 'scope_tab', 'popular_topic', 'ask_super_agent',
-      'open_skill_fallback', 'toggle_options', 'toggle_instruction', 'run_super_agent'],
+      'open_skill_fallback', 'toggle_options', 'toggle_instruction', 'run_super_agent',
+      'close_modal', 'check_balance'],
     // The chosen value of a control with a small fixed set of choices; never free text.
     option: ['on', 'off', 'light', 'dark', 'en', 'zh-CN', 'ja', 'ko', 'de', 'fr', 'ru', 'es', 'pt-BR', 'it', 'tr',
       'all', 'images', 'video', 'audio', 'fonts',

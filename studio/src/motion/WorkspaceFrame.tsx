@@ -34,6 +34,7 @@ import { GITHUB_REPOSITORY } from './githubRepository';
 import { trackMotion } from './tracking';
 import { ApplicationHeader, WorkspaceUtilityActions } from './ApplicationChrome';
 import { BlackFridayTopBanner } from './BlackFridayTopBanner';
+import { MonetizationGateModal } from './monetization/MonetizationGateModal';
 import { dismissBannerToday, shouldShowBlackFridayBanner, useMinuteCondition } from './campaignAttribution';
 import type { McpEntry } from './pageTracking';
 import { WorkspaceProjectsButton } from './WorkspaceProjectsButton';
@@ -629,6 +630,7 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     </div>
     </Dialog.Root>
     <OverlayLayer {...overlaySharedProps} placement="portal" />
+    <MonetizationGateModal />
   </WorkspaceChromeContext.Provider>;
 }
 

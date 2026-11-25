@@ -3,7 +3,7 @@
 <p align="center"><strong>世界初の Super Game Agent —— オープンソース・フルスタック AI ゲームスタジオ</strong></p>
 
 <p align="center">
-  <img src="readme/opengame-hero.webp" width="100%" alt="OpenGame — 世界初の Super Game Agent。22種類のローカル AI Agent と26本の内蔵ゲームテンプレートから、3D・アニメ・ドット絵・9:16 縦型ミニゲームを制作・リミックス・検証・公開。">
+  <img src="readme/opengame-hero.webp" width="100%" alt="OpenGame — 世界初の Super Game Agent。22種類のローカル AI Agent と25本の内蔵ゲームテンプレートから、3D・アニメ・ドット絵・9:16 縦型ミニゲームを制作・リミックス・検証・公開。">
 </p>
 
 <p align="center">
@@ -31,12 +31,12 @@
 
 # OpenGame とは
 
-OpenGame は**世界初のオープンソース・フルスタック Super Game Agent** です。手元のローカルコーディング Agent を**オープンソースの AI 版 Unreal Engine / Unity** かつ本格的なゲームスタジオへと変え、一言のアイデアやヒット作テンプレートから**制作 → 自動プレイテスト検証 → ワンクリック共有 → 公開・収益化**までの全工程を一気通貫で実現します。
+OpenGame は**世界初のオープンソース・フルスタック Super Game Agent** です。**DeepSeek（DSH）**、**Claude Code**、**Codex** をはじめとする手元のローカルコーディング Agent を**オープンソースの AI 版 Unreal Engine / Unity** かつフルスタックのゲームスタジオへと変え、一言のアイデアから **AAA 級の 3D 大作**、さらには**収益化まで見据えたヒットミニゲーム**を一気通貫で生み出します。
 
-- 🎮 **あらゆるゲームをワンクリックでリミックス。** **26 本のプレイ可能な内蔵テンプレート**（3D・ボクセル・ドット絵・アニメ・9:16 縦型ミニゲーム／プレイアブル広告）を搭載し、ソースコードも設計書もすべて編集可能。
-- 🎨 **あらゆるゲームをワンクリックでスタイル変換。** 検証済みのゲームループを保ったまま、キャラクター・アートスタイル・BGM を瞬時に差し替え。**DeepSeek** などの高コスパモデルで手早く高品質なリスキンを量産でき、**Claude Fable 5.2 / Opus / Codex / Gemini** ならゼロから 3D 大作にも挑めます。
-- 💰 **一気通貫のパイプライン：制作 → 検証 → 配信・収益化。** ロジック検証・バランスシミュレーション・実機プレイテスト・カバー画像撮影・トレーラー録画まで自動化し、Web 共有リンク・9:16 プレイアブル広告・ミニゲームプラットフォーム向け出力に対応。
-- 🔓 **フルスタック・オープンソース（BYOA + BYOK）。** コード・アート・映像・BGM・ボイス・効果音・Three.js 3D まですべてオープンソース。お使いの [ローカル Agent](#agent-wall) と API キー、または [OpenDesign Go](https://go.open-design.ai/?utm_source=github&utm_medium=referral&utm_campaign=opengame&utm_content=readme_ja) を接続して利用できます。
+- 🚀 **Agent で AAA 級の 3D ゲームを構築。** **DeepSeek（DSH）**・**Claude**・**Codex**・**Gemini** からコード・3D シーン・アート・BGM・ボイスを丸ごと駆動し、一言のプロンプトから遊べる 3D アクション・レース・オープンワールドを制作。
+- 🎮 **あらゆるゲームをワンクリックでリミックス＆スタイル変換。** **25 本のプレイ可能な内蔵テンプレート**（3D・ボクセル・ドット絵・アニメ・9:16 ヒットミニゲーム／プレイアブル広告）を完全オープンソースで搭載し、検証済みゲームループのまま数分で画風や世界観を刷新。
+- 💰 **稼げるゲームを届ける：制作 → 検証 → 配信・収益化。** ロジック検証・バランスシミュレーション・実機プレイテスト・カバー撮影・トレーラー録画まで自動化し、Web 共有リンクや単一ファイル **9:16 プレイアブル広告**、**WeChat ミニゲーム / TikTok / Douyin** 向けの配信・収益化パスへ接続。
+- 🔓 **フルスタック・オープンソース（BYOA + BYOK）。** コード・アート・映像・BGM・ボイス・効果音・Three.js 3D まですべてオープンソース。普段お使いの [ローカル Agent](#agent-wall) と API キー、または [OpenDesign Go](https://go.open-design.ai/?utm_source=github&utm_medium=referral&utm_campaign=opengame&utm_content=readme_ja)（ブラックフライデー期間中は最安割引・**DeepSeek V4.1 Flash** や **Seedream** などのモデルが無料）にすぐ接続できます。
 
 <a id="quick-start"></a> <a id="クイックスタート"></a>
 
@@ -82,7 +82,7 @@ npm start
 
 ## 🕹️ 内蔵プレイ可能ゲームテンプレート & ショーケース
 
-OpenGame は [`templates/games/`](../templates/games/) に**すぐ遊べる 26 本の完全なゲームプロジェクト**を標準搭載しています。すべて HTML5 / Three.js ソースコード、カバーアート、操作ガイド、多言語メタデータ付き。Game Studio 上でそのまま試遊し、ワンクリックで **Remix**、あるいは**世界観・アートスタイル・キャラクターを丸ごと差し替えて**自分だけの作品にできます。
+OpenGame は [`templates/games/`](../templates/games/) に**すぐ遊べる 25 本の完全なゲームプロジェクト**を標準搭載しています。すべて HTML5 / Three.js ソースコード、カバーアート、操作ガイド、多言語メタデータ付き。Game Studio 上でそのまま試遊し、ワンクリックで **Remix**、あるいは**世界観・アートスタイル・キャラクターを丸ごと差し替えて**自分だけの作品にできます。
 
 ### 3D・ボクセル・アクションゲーム（16:9 横画面）
 
@@ -232,7 +232,7 @@ OpenGame は [`templates/games/`](../templates/games/) に**すぐ遊べる 26 �
 </table>
 
 <details>
-<summary><strong>全 26 本の内蔵プレイ可能テンプレート一覧を開く</strong></summary>
+<summary><strong>全 25 本の内蔵プレイ可能テンプレート一覧を開く</strong></summary>
 
 | ゲーム名 | ジャンル | スタイル | 画面比率 | 概要 | ソース |
 | --- | --- | --- | --- | --- | --- |
@@ -242,7 +242,6 @@ OpenGame は [`templates/games/`](../templates/games/) に**すぐ遊べる 26 �
 | **Gate Legion** | カジュアル | ドット絵 | 9:16 縦画面 | 算数ゲートで軍勢を増やしてボス軍団と戦うヒット系ランナー | [gate-legion](../templates/games/gate-legion/) |
 | **Glyph Garden** | カジュアル | アニメ | 16:9 横画面 | 連鎖コンボが爽快なファンタジー調マッチ3パズル | [glyph-garden](../templates/games/glyph-garden/) |
 | **Harbor Skirmish** | シューター | 3D | 16:9 横画面 | 二段ジャンプ・スライディング・グラップルを備えた 3D FPS | [harbor-skirmish](../templates/games/harbor-skirmish/) |
-| **Hollow Signal** | ホラー | ミニマル | 16:9 横画面 | 正気度が尽きる前にノイズ周波数を合わせるラジオホラー | [hollow-signal](../templates/games/hollow-signal/) |
 | **Jingyang Ridge** | カジュアル | アニメ | 16:9 横画面 | 予備動作を見切り回避・反撃を決める水墨武侠ボス戦 | [jingyang-ridge](../templates/games/jingyang-ridge/) |
 | **Lane Turret** | シューター | ドット絵 | 9:16 縦画面 | 強化カード選択付きの自動砲台ウェーブ防衛 | [lane-turret](../templates/games/lane-turret/) |
 | **Lantern Hop** | プラットフォーマー | ドット絵 | 16:9 横画面 | 月夜の屋根を駆けるキツネの二段ジャンプ・エンドレスランナー | [lantern-hop](../templates/games/lantern-hop/) |
@@ -274,7 +273,7 @@ OpenGame は [`templates/games/`](../templates/games/) に**すぐ遊べる 26 �
 白紙のプロンプトから完成度の高いゲームをゼロから作るのは、最先端モデルにとっても難題です。OpenGame は**検証済みのゲームエンジニアリング基盤**と**世界観・アート・演出コンテンツ**を分離することでこの壁を突破します：
 
 - **すべてが透明で編集可能なソースコード**：`index.html`、決定論的ロジック `logic.js`、3D 向け内蔵 Three.js、さらに構造化設計ドキュメント（`design/plan.md`、`design/style.md`、`design/assets.csv`、`design/verification.md`）で構成されます。
-- **ワンクリックでリミックス**：Game Studio で 26 本のテンプレートから **Remix** を押す（または Agent に指示する）だけで、操作系・パラメータ調整・自動テストフックまで整った編集用ドラフトを即座に複製できます。
+- **ワンクリックでリミックス**：Game Studio で 25 本のテンプレートから **Remix** を押す（または Agent に指示する）だけで、操作系・パラメータ調整・自動テストフックまで整った編集用ドラフトを即座に複製できます。
 - **あらゆる世界観へスタイル変換**：物理挙動や勝敗ルールを壊さず、題材・キャラクター・配色・スプライト・テクスチャ・BGM を差し替え可能。**DeepSeek** などの高コスパモデルで高速イテレーションを回すのも、**Claude Fable 5.2 / Opus / Codex / Gemini** で本格的な 3D オリジナル作品に挑むのも自由です。
 
 **接続済みの Agent でそのまま試せるプロンプト例：**
@@ -448,7 +447,7 @@ OpenGame はローカル stdio MCP 経由で完全なゲーム開発ツール群
 | **ゲーム実行基盤 & 自動 QA** | Node.js, ネイティブ HTTP, Puppeteer Core / Chrome, 決定論シミュレーター | [game-projects.ts](../game-projects.ts) · [shared/game-contract.ts](../shared/game-contract.ts) · [server.ts](../server.ts) |
 | **MCP & ゲーム Skill** | ローカル stdio MCP サーバー、`openmotion-game` Skill & 18 冊のハンドブック | [mcp.ts](../mcp.ts) · [skills/openmotion-game/](../skills/openmotion-game/) |
 | **マルチモーダル Gateway** | BYOK モデル検出・非同期ジョブ管理・アセットライブラリ & Web 公開 | [gateway/service.ts](../gateway/service.ts) · [gateway/catalog.ts](../gateway/catalog.ts) · [docs/assets.md](assets.md) |
-| **内蔵テンプレート** | カバー・メタデータ付き 26 本の独立 HTML5 / Canvas / Three.js ゲーム | [templates/games/](../templates/games/) |
+| **内蔵テンプレート** | カバー・メタデータ付き 25 本の独立 HTML5 / Canvas / Three.js ゲーム | [templates/games/](../templates/games/) |
 | **トレーラー録画パイプライン** | ヘッドレス実機録画 + HTML コンポジション + FFmpeg MP4 書き出し | [docs/usage.md](usage.md) · [scripts/verify-export.ts](../scripts/verify-export.ts) |
 
 <a id="community"></a>

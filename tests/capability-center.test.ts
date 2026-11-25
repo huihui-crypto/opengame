@@ -852,3 +852,77 @@ test('concurrent script requestId reservation, capability dryRun parameter valid
       gateway.submit = origSubmit;
     }
   }, false));
+
+test('static-policy quotes require explicit approval for all billed media capabilities (image, music, speech) and raw models', () =>
+  fixture(async store => {
+    const api = service(store);
+    const musicQuote = await api.call('openmotion_capability_discover', { action: 'quote', capabilityId: 'music' });
+    assert.equal(musicQuote.quote.requiresExplicitApproval, true);
+    const imageQuote = await api.call('openmotion_capability_discover', { action: 'quote', capabilityId: 'text-to-image' });
+    assert.equal(imageQuote.quote.requiresExplicitApproval, true);
+    const speechQuote = await api.call('openmotion_capability_discover', { action: 'quote', capabilityId: 'speech' });
+    assert.equal(speechQuote.quote.requiresExplicitApproval, true);
+    const removeBgQuote = await api.call('openmotion_capability_discover', { action: 'quote', capabilityId: 'remove-background' });
+    assert.equal(removeBgQuote.quote.requiresExplicitApproval, true);
+    const asrQuote = await api.call('openmotion_capability_discover', { action: 'quote', capabilityId: 'asr-transcribe' });
+    assert.equal(asrQuote.quote.requiresExplicitApproval, false);
+  }, false));
+
+test('capability_discover forwards modality to inspect so image-only providers do not hide missing audio sign-in or subscription handoffs', t =>
+  fixture(async store => {
+    const api = service(store);
+    const gateway = gatewayFor(store);
+    gateway.options.detect = async () => [
+      { id: 'codex', label: 'Codex', installed: true, authenticated: true, imageGeneration: true, available: true, reason: 'fixture' },
+    ];
+    let accountState: { state: 'signed-out' | 'signed-in'; plan?: 'free' | 'go' | 'plus'; billingUnavailable: boolean } = {
+      state: 'signed-out',
+      billingUnavailable: false,
+    };
+    t.mock.method(gateway.account, 'summary', async () => accountState);
+    t.mock.method(gateway.account, 'mediaModels', async () => []);
+    t.mock.method(gateway.account, 'upgradeLink', async (entryId: string) => ({
+      url: `https://open-design.ai/cloud/dashboard?billing=plan&od_entry_id=opengame-${entryId}`,
+    }));
+
+    // 1. Signed out + Codex image-only: audio discovery MUST still return agent_media_signed_out
+    const listAudioSignedOut = await api.call('openmotion_capability_discover', { action: 'list', modality: 'audio' });
+    assert.deepEqual(listAudioSignedOut.settingsHandoff, {
+      tool: 'openmotion_open_preview',
+      arguments: { target: 'providers', entry: 'agent_media_signed_out' },
+    });
+    const providersAudioSignedOut = await api.call('openmotion_capability_discover', { action: 'providers', modality: 'audio' });
+    assert.deepEqual(providersAudioSignedOut.settingsHandoff, {
+      tool: 'openmotion_open_preview',
+      arguments: { target: 'providers', entry: 'agent_media_signed_out' },
+    });
+
+    // Image discovery sees Codex as usable, so no sign-in handoff entry is needed for image
+    const providersImageSignedOut = await api.call('openmotion_capability_discover', { action: 'providers', modality: 'image' });
+    assert.deepEqual(providersImageSignedOut.settingsHandoff, {
+      tool: 'openmotion_open_preview',
+      arguments: { target: 'providers' },
+    });
+
+    // 2. Signed in on Free / Go + Codex image-only: audio discovery MUST return subscription upgrade handoff + link
+    for (const plan of ['free', 'go'] as const) {
+      accountState = { state: 'signed-in', plan, billingUnavailable: false };
+      const listAudioUpgrade = await api.call('openmotion_capability_discover', { action: 'list', modality: 'audio' });
+      assert.deepEqual(listAudioUpgrade.settingsHandoff, {
+        tool: 'openmotion_open_preview',
+        arguments: { target: 'providers', entry: `agent_media_upgrade_${plan}` },
+      });
+      assert.match(listAudioUpgrade.upgrade?.url ?? '', /billing=plan/);
+
+      const providersAudioUpgrade = await api.call('openmotion_capability_discover', { action: 'providers', modality: 'audio' });
+      assert.deepEqual(providersAudioUpgrade.settingsHandoff, {
+        tool: 'openmotion_open_preview',
+        arguments: { target: 'providers', entry: `agent_media_upgrade_${plan}` },
+      });
+      assert.match(providersAudioUpgrade.upgrade?.url ?? '', /billing=plan/);
+    }
+
+    // 3. 3D placeholder stays safely discoverable without throwing
+    const models3d = await api.call('openmotion_capability_discover', { action: 'models', modality: '3d' });
+    assert.deepEqual(models3d, { providers: [], catalogs: [], setupRequired: true });
+  }, false));

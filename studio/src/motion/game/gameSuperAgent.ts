@@ -24,6 +24,22 @@ export function localizedGameDescription(game: GameCard, locale: string): string
   return game.i18n?.[locale]?.description || game.description;
 }
 
+export function localizedGameControls(game: GameCard, locale: string): string {
+  return game.i18n?.[locale]?.controls || game.controls || '';
+}
+
+export function matchesDefaultGameDescription(game: Pick<GameCard, 'description' | 'i18n'>, text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (trimmed === game.description.trim()) return true;
+  if (game.i18n) {
+    for (const loc of Object.values(game.i18n)) {
+      if (loc?.description && trimmed === loc.description.trim()) return true;
+    }
+  }
+  return false;
+}
+
 export function toGameCapabilityRef(game: GameCard, displayTitle: string): CapabilityResourceRef {
   return {
     kind: 'game-project',
@@ -77,7 +93,7 @@ export function buildGameContextTags(
   tags.push({ kind: 'param', label: game.orientation === 'portrait' ? '9:16' : '16:9' });
   tags.push({
     kind: 'param',
-    label: game.playableAd ? t('Playable ad') : game.multiplayer ? t('Multiplayer') : t('Single player'),
+    label: game.playableAd ? t('Ad-revenue game') : game.multiplayer ? t('Multiplayer') : t('Single player'),
   });
   return tags;
 }
@@ -93,10 +109,28 @@ export function buildGameUserPrompt(game: GameCard, locale: string, userNotes?: 
     : `Build the game "${title}".`;
 }
 
-export function buildGameHiddenInstructions(game: GameCard, instruction: string, userNotes?: string): string {
+export type GameHiddenInstructionOptions = {
+  /** True when the project was copied from a ready/published built-in local template. */
+  builtInTemplateRemix?: boolean;
+  /** True when the user supplied their own custom prompt text beyond the default template description. */
+  hasUserPromptText?: boolean;
+  /** Explicit parameter overrides chosen by the user that differ from the template defaults. */
+  parameterOverrides?: string[];
+  /** True when the user attached additional workspace files/assets/brand kits in this turn. */
+  hasExtraAttachments?: boolean;
+  /** Active UI locale, used to surface localized title/controls for instant delivery. */
+  locale?: string;
+};
+
+export function buildGameHiddenInstructions(
+  game: GameCard,
+  instruction: string,
+  userNotes?: string,
+  options?: GameHiddenInstructionOptions,
+): string {
   const layout = game.orientation === 'portrait' ? 'portrait 9:16 phone layout (390x844)' : 'landscape 16:9 widescreen layout';
   const trimmedNotes = userNotes?.trim();
-  const extraNotes = trimmedNotes && trimmedNotes !== game.description.trim()
+  const extraNotes = trimmedNotes && !matchesDefaultGameDescription(game, trimmedNotes)
     ? `Additional user notes: ${trimmedNotes}`
     : '';
   const contextParts = [
@@ -106,10 +140,37 @@ export function buildGameHiddenInstructions(game: GameCard, instruction: string,
     `multiplayer=${game.multiplayer}`,
     `orientation=${layout}`,
     // The draft instruction already carries the ad recipe; repeating the format here keeps it visible in Super Agent turns.
-    game.playableAd ? 'format=playable ad (follow the openmotion-game playable-ad recipe: first-frame play with a hand tutorial, short levels, win/fail end cards with a store CTA, one self-contained HTML)' : '',
+    game.playableAd ? 'format=playable ad (follow the openmotion-game playable-ad recipe: first-frame play with a hand tutorial, short progressive levels, win/fail end cards with a store CTA; standard OpenMotion runtime and generated media such as BGM are supported)' : '',
   ].filter(Boolean);
-  const assetNote = game.playableAd || instruction.includes('openmotion_media_use') ? '' : ` ${gameAssetInstructions}`;
-  const consentNote = game.playableAd ? '' : ' (except a single batched spend-consent check when priced media generation is planned)';
+  if (options?.builtInTemplateRemix) {
+    const locale = options.locale || 'en';
+    const displayTitle = localizedGameTitle(game, locale).trim() || game.title;
+    const controls = localizedGameControls(game, locale).trim();
+    const overrides = options.parameterOverrides?.filter(Boolean) ?? [];
+    const turnSignals = [
+      overrides.length > 0
+        ? `Explicit parameter overrides: ${overrides.join(', ')} (treat as requested custom modifications).`
+        : 'No template parameters were overridden.',
+      options.hasUserPromptText
+        ? 'The user wrote custom text in this turn — infer from its meaning whether they are requesting any custom changes to the game or simply asking to create/deliver it as-is.'
+        : 'The user did not write custom modification text in this turn.',
+      options.hasExtraAttachments
+        ? 'The user also attached extra workspace resources/files — check whether they expect those assets or brand styling to be integrated into the game.'
+        : '',
+    ].filter(Boolean).join(' ');
+    const readyMeta = [
+      `Display title: ${JSON.stringify(displayTitle)}`,
+      controls ? `Controls: ${controls}` : '',
+    ].filter(Boolean).join('. ');
+    return [
+      instruction,
+      extraNotes,
+      `Game Studio context: ${contextParts.join(', ')}.${readyMeta ? ` ${readyMeta}.` : ''} Built-in template remix turn signals: ${turnSignals} If NO custom modifications are requested, deliver immediately without reading workflow docs, editing files, validating, playtesting, or capturing a cover: silently call openmotion_game_set_status(id="${game.id}", status="ready") and openmotion_present_artifact(kind="game-project", projectId="${game.id}", title=${JSON.stringify(displayTitle)}) without any pre-tool "opening preview" message. If custom modifications ARE requested, read the existing project files with openmotion_game_get / openmotion_game_read_file and edit them in place, verify the changes, and finish with openmotion_present_artifact(kind="game-project", projectId="${game.id}", title=${JSON.stringify(displayTitle)}). On BOTH paths, open your final reply in the user's language as the builder who just coded and finished the game for them (e.g. "《${displayTitle}》已为你制作完成……" / "I've built ${displayTitle} for you — ..."), never open with passive "opened the preview" or "updated" wording, never mention templates, source copying, internal skills, or skipped checks, and never fabricate unexecuted checks.`,
+    ].filter(Boolean).join('\n\n');
+  }
+
+  const assetNote = instruction.includes('openmotion_media_use') ? '' : ` ${gameAssetInstructions}`;
+  const consentNote = ' (except a single sign-in/subscription setup handoff when planned multimodal providers are unavailable, or a single batched spend-consent check when priced media generation is planned)';
   return [
     instruction,
     extraNotes,
@@ -117,8 +178,13 @@ export function buildGameHiddenInstructions(game: GameCard, instruction: string,
   ].filter(Boolean).join('\n\n');
 }
 
-export function buildDirectGamePrompt(game: GameCard, instruction: string, userNotes?: string): string {
-  return buildGameHiddenInstructions(game, instruction, userNotes);
+export function buildDirectGamePrompt(
+  game: GameCard,
+  instruction: string,
+  userNotes?: string,
+  options?: GameHiddenInstructionOptions,
+): string {
+  return buildGameHiddenInstructions(game, instruction, userNotes, options);
 }
 
 const gameBriefGenreTokens = Array.from(new Set([
@@ -130,6 +196,25 @@ const gameBriefOptions = new RegExp(`^${gameBriefOption}(?:, ${gameBriefOption})
 
 /** Show the brief from a stored Game Studio handoff without altering the original turn. */
 export function readDirectGameBrief(text: string, gameId: string): string | undefined {
+  const context = text.lastIndexOf('\n\nGame Studio context: ');
+  const instructionEnd = context < 0 ? text.length : context;
+
+  const builtInTemplatePrefix = `This workspace game ${gameId} is a remix game copied from a complete, playable built-in template (code, assets, cover, controls, and metadata are already in place). Brief: `;
+  if (text.startsWith(builtInTemplatePrefix)) {
+    const briefStart = builtInTemplatePrefix.length;
+    const steps = text.lastIndexOf('\nFirst, infer from the user\'s message in this turn', instructionEnd);
+    if (steps < briefStart) return;
+    const notesMarker = '\n\nAdditional user notes: ';
+    const notesStart = text.indexOf(notesMarker, steps);
+    if (notesStart >= 0 && notesStart < context) return text.slice(notesStart + notesMarker.length, context).trim();
+    const overrideStart = text.lastIndexOf('\nExplicit parameter overrides vs template defaults: ', steps);
+    const briefEnd = overrideStart >= briefStart ? overrideStart : steps;
+    const brief = stripGameBriefPromptSuffixes(text.slice(briefStart, briefEnd))
+      .replace(gameBriefOptions, '')
+      .trim();
+    return brief || undefined;
+  }
+
   const header = `game ${gameId} in this workspace. Read openmotion://workflow/game/start`;
   const prefix = ['build', 'remix']
     .map(action => `Use the openmotion-game Skill to ${action} ${header}`)
@@ -151,8 +236,6 @@ export function readDirectGameBrief(text: string, gameId: string): string | unde
     }
   }
   if (markerStart < 0 || briefStart < 0) return;
-  const context = text.lastIndexOf('\n\nGame Studio context: ');
-  const instructionEnd = context < 0 ? text.length : context;
   const steps = Math.max(
     text.lastIndexOf('\nBuild a single-player game. Ask for local-market publication consent only when missing.', instructionEnd),
     text.lastIndexOf('\nAsk whether to publish to the local market only when the decision is missing.', instructionEnd),

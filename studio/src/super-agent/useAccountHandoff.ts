@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AccountSummary } from '../../../shared/provider-directory';
 import type { SuperAgentActionCard } from '../../../shared/super-agent';
 import { gatewayRequest } from '../motion/gatewayClient';
-import { newTrackingId } from '../motion/pageTracking';
+import { newCampaignEntryId } from '../motion/campaignAttribution';
+import { reportEntitlementRefresh } from '../motion/pageTracking';
 import { notifyProvidersChanged } from '../motion/useProviderDirectory';
 import { accountHandoffReducer, planMediaEntitlement, type AccountHandoffState } from './accountHandoff';
 
@@ -13,33 +14,43 @@ const UPGRADE_TIMEOUT = 20 * 60_000;
 // The conversation stream unmounts while the preview is expanded. In-flight handoffs live here, keyed by
 // chat + turn + card (gateway card ids repeat across turns and chats), so a remounted card picks up its
 // pending request, polling and deadline instead of falling back to idle; resumes stay once per key.
-type PlanRequest = Promise<{ url: string; opened: boolean }>;
-type HandoffSession = { state: AccountHandoffState; entryId: string; deadline: number; planRequest?: PlanRequest };
+type HandoffSession = { state: AccountHandoffState; entryId: string; deadline: number; plansEntryId: string | null };
+
+/**
+ * Same touchpoint hook ids as the commercialization gates (#24), so one funnel covers these cards. Publish sign-in
+ * cards reuse the Cloud Share hooks of the publish popover (game_publish_signin for games, cloud_share_signin otherwise).
+ */
+export function accountHandoffHookId(card: Pick<SuperAgentActionCard, 'kind' | 'targetKind'>) {
+  if (card.kind === 'web_publish_sign_in') return card.targetKind === 'game' ? 'game_publish_signin' as const : 'cloud_share_signin' as const;
+  return card.kind === 'sign_in' ? 'studio_generate' as const : 'studio_free_gate' as const;
+}
 const sessions = new Map<string, HandoffSession>();
-const resumedCards = new Set<string>();
+// One continuation per key, shared by every mount: in flight or succeeded. A failed one is removed so Retry re-sends.
+const resumeRuns = new Map<string, Promise<void>>();
 /** Test-only: forget in-flight handoffs and resumed cards. */
-export function resetAccountHandoffSessions() { sessions.clear(); resumedCards.clear(); }
+export function resetAccountHandoffSessions() { sessions.clear(); resumeRuns.clear(); }
 function persisted(state: AccountHandoffState) {
   return ['starting', 'signed_in', 'authorizing', 'opening_plan', 'awaiting_upgrade', 'failed'].includes(state.status);
 }
 
-/** Publish cards reuse the Cloud Share sign-in hooks so attribution matches the publish popover. */
-export function accountHandoffSignInHook(card: SuperAgentActionCard) {
-  if (card.kind !== 'web_publish_sign_in') return 'super_agent_signin' as const;
-  return card.targetKind === 'game' ? 'game_publish_signin' as const : 'cloud_share_signin' as const;
-}
-
 export function useAccountHandoff(card: SuperAgentActionCard, onResume?: AccountHandoffResume, handoffKey = card.id) {
-  const signInOnly = card.kind === 'web_publish_sign_in';
-  const hookId = accountHandoffSignInHook(card);
   const [state, setState] = useState<AccountHandoffState>({ status: 'idle' });
   const [alreadySignedIn, setAlreadySignedIn] = useState(false);
+  // Signed in on Free/Go at mount: an upgrade card can go straight to the pricing link.
+  const [signedInForPlans, setSignedInForPlans] = useState(false);
+  const [entryIdState, setEntryIdState] = useState('');
+  const attempts = useRef(0);
+  // entry_id carried by the pricing link the user last opened; its checkout-return refresh reports this id.
+  const plansEntryId = useRef<string | null>(null);
+  const hookId = useRef(accountHandoffHookId(card));
+  hookId.current = accountHandoffHookId(card);
+  // Publishing only needs a signed-in account: plan entitlement never applies to publish sign-in cards.
+  const signInOnly = card.kind === 'web_publish_sign_in';
   const current = useRef(state);
   const mounted = useRef(false);
   const generation = useRef(0);
   const entryId = useRef('');
   const deadline = useRef(0);
-  const resumed = useRef(resumedCards);
   const key = useRef(handoffKey);
   key.current = handoffKey;
   const resume = useRef(onResume);
@@ -51,13 +62,13 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     if (!mounted.current) return;
     current.current = next;
     setState(next);
-    const previous = sessions.get(key.current);
-    if (persisted(next)) {
-      sessions.set(key.current, {
-        state: next, entryId: entryId.current, deadline: deadline.current,
-        ...(next.status === 'opening_plan' && previous?.planRequest ? { planRequest: previous.planRequest } : {}),
-      });
-    } else sessions.delete(key.current);
+    // A pricing link already used keeps its id; the next one the card renders gets a fresh entry_id.
+    if (next.status === 'failed' && next.phase === 'upgrade' && plansEntryId.current === entryId.current) {
+      entryId.current = newCampaignEntryId();
+      setEntryIdState(entryId.current);
+    }
+    if (persisted(next)) sessions.set(key.current, { state: next, entryId: entryId.current, deadline: deadline.current, plansEntryId: plansEntryId.current });
+    else sessions.delete(key.current);
   }, []);
   const isCurrent = useCallback((run: number) => mounted.current && generation.current === run, []);
   // Right after sign-in the connector may report signed-in before its first billing read lands (no plan yet).
@@ -81,19 +92,18 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
       let summary = await gatewayRequest<AccountSummary>('settings/account');
       if (!isCurrent(run)) return;
       if (summary.state !== 'signed-in') {
-        summary = await gatewayRequest<AccountSummary>('settings/account/login', 'POST', { hookId, entryId: entryId.current });
+        summary = await gatewayRequest<AccountSummary>('settings/account/login', 'POST', { hookId: hookId.current, entryId: entryId.current });
       }
       if (!isCurrent(run)) return;
       summary = await withPlan(summary);
       if (!isCurrent(run)) return;
       if (summary.state === 'signed-in') notify();
       const next = accountHandoffReducer({ status: 'starting' }, summary, { signInOnly });
-      if (next.status === 'opening_plan') deadline.current = Date.now() + UPGRADE_TIMEOUT;
       transition(next);
     } catch (error) {
       if (isCurrent(run)) transition({ status: 'failed', reason: 'start_failed', message: error instanceof Error ? error.message : undefined });
     }
-  }, [hookId, isCurrent, notify, signInOnly, transition, withPlan]);
+  }, [isCurrent, notify, signInOnly, transition, withPlan]);
 
   useEffect(() => {
     mounted.current = true;
@@ -102,6 +112,9 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     if (saved) {
       entryId.current = saved.entryId;
       deadline.current = saved.deadline;
+      plansEntryId.current = saved.plansEntryId;
+      attempts.current = 1;
+      setEntryIdState(saved.entryId);
       const restored: AccountHandoffState = saved.state.status === 'signed_in' ? { status: 'starting' } : saved.state;
       current.current = restored;
       setState(restored);
@@ -111,11 +124,17 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     current.current = { status: 'idle' };
     setState(current.current);
     setAlreadySignedIn(false);
+    setSignedInForPlans(false);
+    entryId.current = newCampaignEntryId();
+    attempts.current = 0;
+    setEntryIdState(entryId.current);
     // A restored card never resumes by itself. Its initial read only changes the idle CTA.
     void gatewayRequest<AccountSummary>('settings/account').then(summary => {
       if (isCurrent(run) && current.current.status === 'idle') {
-        setAlreadySignedIn(summary.state === 'signed-in'
-          && (signInOnly || (!summary.billingUnavailable && planMediaEntitlement(summary.plan) === 'included')));
+        if (signInOnly) { setAlreadySignedIn(summary.state === 'signed-in'); return; }
+        const signedIn = summary.state === 'signed-in' && !summary.billingUnavailable;
+        setAlreadySignedIn(signedIn && planMediaEntitlement(summary.plan) === 'included');
+        setSignedInForPlans(signedIn && planMediaEntitlement(summary.plan) === 'not-included');
       }
     }).catch(() => {});
     return () => { mounted.current = false; generation.current++; };
@@ -126,12 +145,10 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     const previous = current.current;
     const reopenPlans = previous.status === 'failed' && previous.phase === 'upgrade';
     const run = ++generation.current;
-    entryId.current = newTrackingId();
     polling.current = null;
-    // Checkout failures reopen plans. Everything else (including upgrade cards) first confirms the local
-    // sign-in: a web checkout cannot sign the local connector in, so a signed-out upgrade card signs in first.
+    // Checkout failures go back to the plans CTA. Everything else (including upgrade cards) first confirms the
+    // local sign-in: a web checkout cannot sign the local connector in, so a signed-out upgrade card signs in first.
     if (reopenPlans) {
-      deadline.current = Date.now() + UPGRADE_TIMEOUT;
       transition({ status: 'opening_plan' });
       return;
     }
@@ -155,6 +172,7 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
       if (!isCurrent(run) || current.current.status !== previous.status) return;
       const next = accountHandoffReducer(current.current, summary, { signInOnly });
       if (summary.state === 'signed-in' && (previous.status === 'authorizing' || next.status === 'resuming')) notify();
+      if (upgrade && next.status === 'resuming') reportEntitlementRefresh('creative_studio', hookId.current, plansEntryId.current ?? entryId.current, 'success', true);
       if (next.status === 'opening_plan') deadline.current = Date.now() + UPGRADE_TIMEOUT;
       transition(next);
     } catch {
@@ -164,42 +182,29 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     }
   }, [isCurrent, notify, signInOnly, transition, withPlan]);
 
-  useEffect(() => {
-    if (state.status !== 'opening_plan') return;
-    const run = generation.current;
-    let active = true;
-    // One subscription request per opening: a card remounted mid-request handles the same pending result.
-    const session = sessions.get(key.current);
-    const request: PlanRequest = session?.planRequest
-      ?? gatewayRequest<{ url: string; opened: boolean }>('settings/account/subscription', 'POST', { hookId: 'super_agent_upgrade', entryId: entryId.current });
-    if (session) session.planRequest = request;
-    void request.then(({ url, opened }) => {
-      if (!active || !isCurrent(run)) return;
-      let planUrl: string | undefined;
-      if (!opened) {
-        try {
-          const page = window.open(url, '_blank');
-          if (page) page.opener = null;
-          else planUrl = url;
-        } catch { planUrl = url; }
-      }
-      deadline.current = Date.now() + UPGRADE_TIMEOUT;
-      transition({ status: 'awaiting_upgrade', planUrl });
-    }).catch(error => {
-      if (active && isCurrent(run)) transition({ status: 'failed', reason: 'plan_open_failed', phase: 'upgrade', message: error instanceof Error ? error.message : undefined });
-    });
-    return () => { active = false; };
-  }, [state.status, isCurrent, transition]);
+  // The pricing link is opened by the card's own anchor (a user gesture, so popup blockers allow it).
+  // That click starts the upgrade wait; detection then polls the local account like the checkout-return refresh.
+  const openPlans = useCallback((planUrl: string) => {
+    const status = current.current.status;
+    const upgradeFailed = status === 'failed' && (current.current as { phase?: string }).phase === 'upgrade';
+    if (!mounted.current || !(status === 'opening_plan' || status === 'idle' || upgradeFailed)) return;
+    ++generation.current;
+    polling.current = null;
+    deadline.current = Date.now() + UPGRADE_TIMEOUT;
+    plansEntryId.current = entryId.current;
+    attempts.current++;
+    transition({ status: 'awaiting_upgrade', planUrl });
+  }, [transition]);
 
   useEffect(() => {
     const login = state.status === 'starting' || state.status === 'authorizing';
-    const upgrade = state.status === 'opening_plan' || state.status === 'awaiting_upgrade';
+    const upgrade = state.status === 'awaiting_upgrade';
     if (!login && !upgrade) return;
     const run = generation.current;
     const timer = window.setTimeout(() => {
       if (!isCurrent(run)) return;
       const status = current.current.status;
-      if (login ? status !== 'starting' && status !== 'authorizing' : status !== 'opening_plan' && status !== 'awaiting_upgrade') return;
+      if (login ? status !== 'starting' && status !== 'authorizing' : status !== 'awaiting_upgrade') return;
       generation.current++;
       polling.current = null;
       transition({ status: 'failed', reason: 'timeout', phase: upgrade ? 'upgrade' : 'sign_in' });
@@ -228,15 +233,17 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     if (state.status !== 'resuming') return;
     const run = generation.current;
     const resumeKey = key.current;
-    if (resumed.current.has(resumeKey)) { transition({ status: 'done' }); return; }
-    resumed.current.add(resumeKey);
-    // Reserve the card before invoking the callback, including synchronous callbacks and Strict Mode effects.
-    void Promise.resolve().then(() => {
-      if (isCurrent(run)) return resume.current?.(card, { plan: state.plan, key: resumeKey });
-    }).then(() => {
+    let runOnce = resumeRuns.get(resumeKey);
+    if (!runOnce) {
+      // Reserved before the callback runs (Strict Mode, remounts). It still runs if this mount goes away first;
+      // the workspace's stable requestId keeps a re-send idempotent.
+      runOnce = Promise.resolve().then(() => resume.current?.(card, { plan: state.plan, key: resumeKey })).then(() => undefined);
+      resumeRuns.set(resumeKey, runOnce);
+      runOnce.catch(() => { if (resumeRuns.get(resumeKey) === runOnce) resumeRuns.delete(resumeKey); });
+    }
+    runOnce.then(() => {
       if (isCurrent(run)) transition({ status: 'done' });
-    }).catch(error => {
-      resumed.current.delete(resumeKey);
+    }, error => {
       // Signed in fine; only the follow-up send failed. Retry re-sends the same continuation.
       if (isCurrent(run)) transition({ status: 'failed', reason: 'continue_failed', message: error instanceof Error ? error.message : undefined });
     });
@@ -253,5 +260,17 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     if (isCurrent(run)) setAlreadySignedIn(false);
   }, [isCurrent, transition]);
 
-  return { state, alreadySignedIn, start, retry: () => start(card), cancel, refresh };
+  /** One entry_id per click: the first click reuses the id its exposure was reported with; later clicks get a new one. */
+  const beginAttempt = useCallback(() => {
+    if (attempts.current++ > 0) {
+      entryId.current = newCampaignEntryId();
+      setEntryIdState(entryId.current);
+    }
+    return entryId.current;
+  }, []);
+
+  return {
+    state, alreadySignedIn, signedInForPlans, entryId: entryIdState, hookId: hookId.current,
+    beginAttempt, start, retry: () => start(card), cancel, refresh, openPlans,
+  };
 }
