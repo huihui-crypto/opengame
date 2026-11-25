@@ -1075,7 +1075,8 @@
     "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "登录 OpenDesign 获取可分享的网页链接，登录后我会自动重新发布。",
     "Publish again": "重新发布",
     "Signed in — publishing again": "已登录，正在重新发布",
-    "Signed in — please publish again.": "已登录，请重新发布。"
+    "Signed in — please publish again.": "已登录，请重新发布。",
+    "Signed in, but couldn't publish again.": "已登录，但没能重新发布。"
   },
   "ja": {
     "Play again": "もう一度遊ぶ",
@@ -2153,7 +2154,8 @@
     "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "OpenDesign にサインインすると共有できるウェブリンクを取得できます。サインイン後、自動で再公開します。",
     "Publish again": "もう一度公開",
     "Signed in — publishing again": "サインイン済み — 再公開しています",
-    "Signed in — please publish again.": "サインインしました。もう一度公開してください。"
+    "Signed in — please publish again.": "サインインしました。もう一度公開してください。",
+    "Signed in, but couldn't publish again.": "サインインしましたが、再公開できませんでした。"
   },
   "ko": {
     "Play again": "다시 플레이",
@@ -3231,7 +3233,8 @@
     "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "OpenDesign에 로그인하면 공유 가능한 웹 링크를 받을 수 있습니다. 로그인하면 자동으로 다시 게시할게요.",
     "Publish again": "다시 게시",
     "Signed in — publishing again": "로그인 완료 — 다시 게시하는 중",
-    "Signed in — please publish again.": "로그인했습니다. 다시 게시해 주세요."
+    "Signed in — please publish again.": "로그인했습니다. 다시 게시해 주세요.",
+    "Signed in, but couldn't publish again.": "로그인했지만 다시 게시하지 못했습니다."
   },
   "de": {
     "Play again": "Erneut spielen",
@@ -4312,7 +4315,8 @@
     "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "Melde dich bei OpenDesign an, um einen teilbaren Weblink zu erhalten. Nach der Anmeldung veröffentliche ich automatisch erneut.",
     "Publish again": "Erneut veröffentlichen",
     "Signed in — publishing again": "Angemeldet — wird erneut veröffentlicht",
-    "Signed in — please publish again.": "Angemeldet — bitte erneut veröffentlichen."
+    "Signed in — please publish again.": "Angemeldet — bitte erneut veröffentlichen.",
+    "Signed in, but couldn't publish again.": "Angemeldet, aber die erneute Veröffentlichung ist fehlgeschlagen."
   },
   "fr": {
     "Play again": "Rejouer",
@@ -5393,7 +5397,8 @@
     "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "Connectez-vous à OpenDesign pour obtenir un lien web partageable. Je republierai automatiquement une fois connecté.",
     "Publish again": "Publier à nouveau",
     "Signed in — publishing again": "Connexion réussie — nouvelle publication en cours",
-    "Signed in — please publish again.": "Connecté — veuillez publier à nouveau."
+    "Signed in — please publish again.": "Connecté — veuillez publier à nouveau.",
+    "Signed in, but couldn't publish again.": "Connecté, mais la nouvelle publication a échoué."
   },
   "ru": {
     "Play again": "Сыграть ещё",
@@ -6476,7 +6481,8 @@
     "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "Войдите в OpenDesign, чтобы получить ссылку для публикации. После входа я автоматически опубликую снова.",
     "Publish again": "Опубликовать снова",
     "Signed in — publishing again": "Вход выполнен — публикую снова",
-    "Signed in — please publish again.": "Вход выполнен — опубликуй снова."
+    "Signed in — please publish again.": "Вход выполнен — опубликуй снова.",
+    "Signed in, but couldn't publish again.": "Вход выполнен, но опубликовать снова не удалось."
   },
   "es": {
     "Play again": "Volver a jugar",
@@ -7557,7 +7563,8 @@
     "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "Inicia sesión en OpenDesign para obtener un enlace web para compartir. Volveré a publicar automáticamente cuando inicies sesión.",
     "Publish again": "Publicar de nuevo",
     "Signed in — publishing again": "Sesión iniciada — publicando de nuevo",
-    "Signed in — please publish again.": "Sesión iniciada — vuelve a publicar."
+    "Signed in — please publish again.": "Sesión iniciada — vuelve a publicar.",
+    "Signed in, but couldn't publish again.": "Sesión iniciada, pero no se pudo volver a publicar."
   },
   "pt-BR": {
     "Play again": "Jogar novamente",
@@ -8638,7 +8645,8 @@
     "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "Entre no OpenDesign para obter um link da web compartilhável. Vou publicar de novo automaticamente quando você entrar.",
     "Publish again": "Publicar novamente",
     "Signed in — publishing again": "Login concluído — publicando novamente",
-    "Signed in — please publish again.": "Login concluído — publique novamente."
+    "Signed in — please publish again.": "Login concluído — publique novamente.",
+    "Signed in, but couldn't publish again.": "Login concluído, mas não foi possível publicar novamente."
   },
   "it": {
     "Play again": "Gioca ancora",
@@ -9719,7 +9727,8 @@
     "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "Accedi a OpenDesign per ottenere un link web condivisibile. Dopo l'accesso ripubblicherò automaticamente.",
     "Publish again": "Pubblica di nuovo",
     "Signed in — publishing again": "Accesso effettuato — ripubblicazione in corso",
-    "Signed in — please publish again.": "Accesso effettuato — pubblica di nuovo."
+    "Signed in — please publish again.": "Accesso effettuato — pubblica di nuovo.",
+    "Signed in, but couldn't publish again.": "Accesso effettuato, ma non è stato possibile ripubblicare."
   },
   "tr": {
     "Play again": "Tekrar oyna",
@@ -10797,6 +10806,7 @@
     "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "Paylaşılabilir bir web bağlantısı almak için OpenDesign'a giriş yap. Giriş yaptığında otomatik olarak yeniden yayınlayacağım.",
     "Publish again": "Yeniden yayınla",
     "Signed in — publishing again": "Giriş yapıldı — yeniden yayınlanıyor",
-    "Signed in — please publish again.": "Giriş yapıldı — lütfen yeniden yayınla."
+    "Signed in — please publish again.": "Giriş yapıldı — lütfen yeniden yayınla.",
+    "Signed in, but couldn't publish again.": "Giriş yapıldı ancak yeniden yayınlanamadı."
   }
 }

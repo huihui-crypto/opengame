@@ -484,6 +484,7 @@ describe('AccountHandoffCard — publish sign-in', () => {
     await render(gameCard);
     await click('Publish again');
     expect(status()).toBe('failed');
+    expect(container.textContent).toContain("Signed in, but couldn't publish again.");
     expect(container.textContent).toContain('Could not continue the conversation. Try again.');
     await click('Retry');
     expect(status()).toBe('done');

@@ -65,7 +65,7 @@ export function AccountHandoffCard({ card, handoffKey, onResume, onOpenSettings 
         : state.reason === 'cancelled' ? 'Sign-in was cancelled.'
         : state.reason === 'connector_unavailable' ? "The OpenDesign sign-in component isn't available on this device."
         : state.reason === 'plan_open_failed' ? "Couldn't open your browser."
-        : state.reason === 'continue_failed' ? "Signed in, but couldn't continue your request." : 'Sign-in failed.');
+        : state.reason === 'continue_failed' ? (publish ? "Signed in, but couldn't publish again." : "Signed in, but couldn't continue your request.") : 'Sign-in failed.');
       description = state.reason === 'unknown' || state.reason === 'start_failed' || state.reason === 'continue_failed' ? state.message || '' : '';
       label = t('Retry'); action = () => void retry();
       if (state.phase === 'upgrade' && state.reason === 'timeout') {
