@@ -30,6 +30,13 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     setState(next);
   }, []);
   const isCurrent = useCallback((run: number) => mounted.current && generation.current === run, []);
+  // Right after sign-in the connector may report signed-in before its first billing read lands (no plan yet).
+  // Read once with refresh so Free/Go accounts are not mistaken for "unknown plan" and resumed without the plans page.
+  const withPlan = useCallback(async (summary: AccountSummary) => (
+    summary.state === 'signed-in' && !summary.billingUnavailable && !summary.plan
+      ? gatewayRequest<AccountSummary>('settings/account?refresh=true').catch(() => summary)
+      : summary
+  ), []);
   const notify = useCallback(() => {
     notifyProvidersChanged();
     window.dispatchEvent(new Event('motion:account-changed'));
@@ -57,8 +64,9 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     const run = ++generation.current;
     entryId.current = newTrackingId();
     polling.current = null;
-    // Checkout failures reopen plans; failed conversation sends recheck the account before retrying.
-    if (reopenPlans || (target.kind !== 'sign_in' && !alreadySignedIn && previous.status !== 'failed')) {
+    // Checkout failures reopen plans. Everything else (including upgrade cards) first confirms the local
+    // sign-in: a web checkout cannot sign the local connector in, so a signed-out upgrade card signs in first.
+    if (reopenPlans) {
       deadline.current = Date.now() + UPGRADE_TIMEOUT;
       transition({ status: 'opening_plan' });
       return;
@@ -74,6 +82,8 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
         summary = await gatewayRequest<AccountSummary>('settings/account/login', 'POST', { hookId: 'super_agent_signin', entryId: entryId.current });
       }
       if (!isCurrent(run)) return;
+      summary = await withPlan(summary);
+      if (!isCurrent(run)) return;
       if (summary.state === 'signed-in') notify();
       const next = accountHandoffReducer({ status: 'starting' }, summary);
       if (next.status === 'opening_plan') deadline.current = Date.now() + UPGRADE_TIMEOUT;
@@ -81,7 +91,7 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     } catch (error) {
       if (isCurrent(run)) transition({ status: 'failed', reason: 'start_failed', message: error instanceof Error ? error.message : undefined });
     }
-  }, [card, alreadySignedIn, isCurrent, notify, transition]);
+  }, [card, isCurrent, notify, transition, withPlan]);
 
   const refresh = useCallback(async () => {
     const previous = current.current;
@@ -92,7 +102,9 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     polling.current = request;
     const run = generation.current;
     try {
-      const summary = await gatewayRequest<AccountSummary>('settings/account' + (upgrade ? '?refresh=true' : ''));
+      let summary = await gatewayRequest<AccountSummary>('settings/account' + (upgrade ? '?refresh=true' : ''));
+      if (!isCurrent(run) || current.current.status !== previous.status) return;
+      if (!upgrade) summary = await withPlan(summary);
       if (!isCurrent(run) || current.current.status !== previous.status) return;
       const next = accountHandoffReducer(current.current, summary);
       if (summary.state === 'signed-in' && (previous.status === 'authorizing' || next.status === 'resuming')) notify();
@@ -103,7 +115,7 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     } finally {
       if (polling.current === request) polling.current = null;
     }
-  }, [isCurrent, notify, transition]);
+  }, [isCurrent, notify, transition, withPlan]);
 
   useEffect(() => {
     if (state.status !== 'opening_plan') return;

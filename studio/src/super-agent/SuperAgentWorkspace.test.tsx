@@ -463,7 +463,7 @@ it('keeps the account card retryable when continuing the conversation is rejecte
       { id: 'explain-block', role: 'assistant', text: 'Sign in to continue.', createdAt: 1003 },
     ],
   };
-  const turnBodies: Array<{ text: string; hiddenInstructions: string }> = [];
+  const turnBodies: Array<{ text: string; hiddenInstructions: string; attachments: unknown[] }> = [];
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -502,6 +502,8 @@ it('keeps the account card retryable when continuing the conversation is rejecte
   expect(turnBodies).toHaveLength(2);
   expect(turnBodies[1].text).toBe('Signed in — please continue.');
   expect(turnBodies[1].hiddenInstructions).toContain('The user just signed in to OpenDesign (plan: plus)');
+  // The automatic continuation never carries the composer's unsent draft attachments.
+  expect(turnBodies[1].attachments).toEqual([]);
 });
 
 function getComposerEditor(rootEl: ParentNode = container): HTMLElement {

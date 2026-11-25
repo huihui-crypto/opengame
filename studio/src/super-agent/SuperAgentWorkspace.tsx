@@ -1065,6 +1065,8 @@ export function SuperAgentWorkspace({
       overrideAttachments?: SuperAgentResourceAttachment[];
       initialArtifact?: Partial<SuperAgentArtifact>;
       followUpBehavior?: SuperAgentFollowUpMode;
+      /** Leave the composer's draft attachments untouched (system-initiated sends such as account resume). */
+      keepDraftAttachments?: boolean;
     },
   ): Promise<boolean> => {
     setSending(true);
@@ -1093,7 +1095,7 @@ export function SuperAgentWorkspace({
         if (effectiveBehavior === 'queue') {
           const result = await enqueueSuperAgentMessage(activeChat.id, turnPayload);
           applyChatSnapshot(result.conversation, false);
-          setAttachments([]);
+          if (!meta?.keepDraftAttachments) setAttachments([]);
           showToast(t('Queued for next turn'), 'info', 'feedback');
           return true;
         }
@@ -1102,7 +1104,7 @@ export function SuperAgentWorkspace({
           followUpBehavior: 'steer',
         });
         applyChatSnapshot(result.conversation, false);
-        setAttachments([]);
+        if (!meta?.keepDraftAttachments) setAttachments([]);
         return true;
       }
       const targetIntent = modeChatIntent(meta?.mode);
@@ -1116,7 +1118,7 @@ export function SuperAgentWorkspace({
       );
       const result = await startSuperAgentTurn(target.id, turnPayload);
       applyChatSnapshot(result.conversation, false);
-      setAttachments([]);
+      if (!meta?.keepDraftAttachments) setAttachments([]);
       return true;
     } catch (error) {
       showToast(error instanceof Error ? error.message : t('Could not start Super Agent'));
@@ -1551,6 +1553,8 @@ export function SuperAgentWorkspace({
       hiddenInstructions: 'The user just signed in to OpenDesign' + (plan ? ` (plan: ${plan})` : '')
         + '. Retry the media generation that was blocked by sign-in or plan in the previous turn, with the same brief and settings. Before any paid generation, still state the expected cost as the existing rules require; do not ask the user to reply again.',
       followUpBehavior: 'queue',
+      overrideAttachments: [],
+      keepDraftAttachments: true,
     });
     if (!continued) throw new Error(t('Could not continue the conversation. Try again.'));
   };

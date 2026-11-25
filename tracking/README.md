@@ -652,7 +652,9 @@ All plugin login and upgrade touchpoints share the closed `entitlementHookIds` e
 - Click: `ui_click` with `hook_id` + `entry_id` across header Pricing (`header_pricing`), Black Friday banner (`bf_banner`),
   Settings sign-in/subscription (`settings_signin` / `settings_subscription`), Media composer gates (`studio_generate` /
   `studio_free_gate`), Model Hub (`model_hub_signin` / `model_hub_upgrade`), Cloud Share (`game_publish_signin` /
-  `cloud_share_signin`), and inline Super Agent sign-in/upgrade (`super_agent_signin` / `super_agent_upgrade`).
+  `cloud_share_signin`). Inline Super Agent sign-in/upgrade cards (`super_agent_signin` / `super_agent_upgrade`)
+  currently join through the backend only (login `account_sign_in_result`, subscription `od_entry_id`); Super Agent has
+  no `page_name` yet, so its card exposure/click events are not emitted.
 - Backend join: `POST /api/settings/account/login` forwards `{ hookId, entryId }` to `account_sign_in_result`;
   `POST /api/settings/account/subscription` forwards `entryId` into `od_entry_id` while preserving the AMR-registered
   `od_entry_source=openmotion_manage_subscription`.
