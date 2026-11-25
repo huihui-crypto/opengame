@@ -1546,7 +1546,22 @@ export function SuperAgentWorkspace({
     }
   }, [handlePlayGame]);
 
+  const handleResumeAfterAccount = async (_card: SuperAgentActionCard, { plan }: { plan?: string }) => {
+    const continued = await handleSend(t('Signed in — please continue.'), {
+      hiddenInstructions: 'The user just signed in to OpenDesign' + (plan ? ` (plan: ${plan})` : '')
+        + '. Retry the media generation that was blocked by sign-in or plan in the previous turn, with the same brief and settings. Before any paid generation, still state the expected cost as the existing rules require; do not ask the user to reply again.',
+      followUpBehavior: 'queue',
+    });
+    if (!continued) throw new Error(t('Could not continue the conversation. Try again.'));
+  };
+
+  const handleOpenActionCardSettings = (card: SuperAgentActionCard) => {
+    if (onOpenProviderSettings) onOpenProviderSettings('account', card.entry);
+    else onOpenAccountSettings?.();
+  };
+
   const handleTriggerActionCard = useCallback(async (card: SuperAgentActionCard) => {
+    if (card.kind === 'sign_in' || card.kind === 'upgrade_free' || card.kind === 'upgrade_go') return;
     const originChatId = activeChat?.id ?? null;
     if (card.kind === 'web_publish_sign_in') {
       if (card.targetKind === 'game' && card.targetId) {
@@ -2244,6 +2259,8 @@ export function SuperAgentWorkspace({
             onRunCommand={handleComposerCommand}
             onOpenAccountSettings={onOpenAccountSettings}
             onTriggerActionCard={card => void handleTriggerActionCard(card)}
+            onResumeAfterAccount={handleResumeAfterAccount}
+            onOpenActionCardSettings={handleOpenActionCardSettings}
             onOpenInDesignStudio={onOpenDesignProject}
             onOpenInMotionStudio={onOpenMotionProject}
             onOpenInAssets={onOpenAsset}

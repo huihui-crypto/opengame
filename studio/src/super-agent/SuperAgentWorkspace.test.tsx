@@ -442,6 +442,68 @@ it('shows only the newest completed MP4 per project in the chat and viewer', asy
   expect(playing()).toBe(latest.downloadUrl);
 });
 
+it('keeps the account card retryable when continuing the conversation is rejected', async () => {
+  clearSuperAgentCache();
+  const fallback = globalThis.fetch;
+  const currentChat: SuperAgentChat = {
+    ...sampleChat,
+    state: 'idle',
+    artifacts: [],
+    approvals: [],
+    activeArtifactId: undefined,
+    messages: [
+      { id: 'request-media', role: 'user', text: 'Generate a neon spaceship', createdAt: 1001 },
+      {
+        id: 'blocked-media', role: 'tool', text: 'Sign in required', createdAt: 1002,
+        toolEvent: {
+          callId: 'blocked-call', tool: 'openmotion_media', label: 'Generate image', status: 'completed',
+          actionCard: { id: 'signin-recovery', kind: 'sign_in', entry: 'agent_media_signed_out', provider: 'account' },
+        },
+      },
+      { id: 'explain-block', role: 'assistant', text: 'Sign in to continue.', createdAt: 1003 },
+    ],
+  };
+  const turnBodies: Array<{ text: string; hiddenInstructions: string }> = [];
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+    if (url === `${SUPER_AGENT_API}/chats/${CHAT_ID}` && (!init?.method || init.method === 'GET')) return json({ conversation: currentChat });
+    if (url === '/motion-api/settings/account') return json({ state: 'signed-in', plan: 'plus', consoleUrl: '' });
+    if (url === `${SUPER_AGENT_API}/chats/${CHAT_ID}/turn` && init?.method === 'POST') {
+      turnBodies.push(JSON.parse(String(init.body)));
+      return turnBodies.length === 1 ? json({ error: 'Temporary send failure' }, 503) : json({ conversation: currentChat });
+    }
+    return fallback(input, init);
+  });
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active chatId={CHAT_ID} onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()} onOpenMotionProject={vi.fn()} onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()} onOpenAgentSettings={vi.fn()} onOpenMcp={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  const accountCard = () => container.querySelector('.om-sa-action-card[data-kind="sign_in"]')!;
+  const clickCardButton = async (label: string) => {
+    const button = Array.from(accountCard().querySelectorAll('button')).find(item => item.textContent === label)!;
+    expect(button).toBeTruthy();
+    await act(async () => button.click());
+    await flush();
+  };
+  await clickCardButton('Continue');
+  expect(accountCard().getAttribute('data-state')).toBe('failed');
+  expect(accountCard().textContent).toContain('Could not continue the conversation. Try again.');
+  await clickCardButton('Retry');
+  expect(accountCard().getAttribute('data-state')).toBe('done');
+  expect(turnBodies).toHaveLength(2);
+  expect(turnBodies[1].text).toBe('Signed in — please continue.');
+  expect(turnBodies[1].hiddenInstructions).toContain('The user just signed in to OpenDesign (plan: plus)');
+});
+
 function getComposerEditor(rootEl: ParentNode = container): HTMLElement {
   return rootEl.querySelector<HTMLElement>('.om-sa-composer .om-sa-composer-editor')!;
 }

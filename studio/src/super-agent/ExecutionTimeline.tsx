@@ -21,6 +21,8 @@ import { useI18n, type Translate } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { WorkingIndicator } from '../motion/AssetCreationVisuals';
 import { readDirectGameBrief } from '../motion/game/gameSuperAgent';
+import { AccountHandoffCard } from './AccountHandoffCard';
+import type { AccountHandoffResume } from './useAccountHandoff';
 import { ArtifactDeliverableCard } from './ArtifactDeliverableCard';
 import { FilesChangedCard, UnifiedDiffView } from './ChangedFilesTree';
 import { InlineMentionChip } from './MentionNode';
@@ -1419,6 +1421,8 @@ export function ExecutionTimeline({
   onNotify,
   onOpenAccountSettings,
   onTriggerActionCard,
+  onResumeAfterAccount,
+  onOpenActionCardSettings,
   onOpenInDesignStudio,
   onOpenInMotionStudio,
   onOpenInAssets,
@@ -1442,6 +1446,8 @@ export function ExecutionTimeline({
   onNotify?: (message: string, tone?: 'info' | 'error') => void;
   onOpenAccountSettings?: () => void;
   onTriggerActionCard?: (card: SuperAgentActionCard) => void;
+  onResumeAfterAccount?: AccountHandoffResume;
+  onOpenActionCardSettings?: (card: SuperAgentActionCard) => void;
   onOpenInDesignStudio?: (projectId: string) => void;
   onOpenInMotionStudio?: (projectId: string) => void;
   onOpenInAssets?: (assetId: string, versionId?: string) => void;
@@ -1588,6 +1594,8 @@ export function ExecutionTimeline({
                           key={card.id}
                           card={card}
                           onTrigger={onTriggerActionCard}
+                          onResume={onResumeAfterAccount}
+                          onOpenSettings={onOpenActionCardSettings}
                         />
                       ))}
                     </div>
@@ -1747,27 +1755,6 @@ function actionCardMeta(kind: SuperAgentActionCard['kind']): {
   cta: string;
 } {
   switch (kind) {
-    case 'sign_in':
-      return {
-        icon: 'account-circle-line',
-        title: 'Sign in with OpenDesign',
-        description: 'Sign in to generate AI art, music, and voice assets, then reply here to continue.',
-        cta: 'Sign in',
-      };
-    case 'upgrade_free':
-      return {
-        icon: 'sparkling-line',
-        title: 'Upgrade to OpenDesign Plus',
-        description: 'Free plan does not include AI media generation. Upgrade to Plus or add your own API key, then reply to continue.',
-        cta: 'Upgrade to Plus',
-      };
-    case 'upgrade_go':
-      return {
-        icon: 'sparkling-line',
-        title: 'Upgrade to OpenDesign Plus',
-        description: 'Go plan does not include AI media generation. Upgrade to Plus or add your own API key, then reply to continue.',
-        cta: 'Upgrade to Plus',
-      };
     case 'top_up':
       return {
         icon: 'error-warning-line',
@@ -1796,12 +1783,19 @@ function actionCardMeta(kind: SuperAgentActionCard['kind']): {
 function TurnActionCard({
   card,
   onTrigger,
+  onResume,
+  onOpenSettings,
 }: {
   card: SuperAgentActionCard;
   onTrigger?: (card: SuperAgentActionCard) => void;
+  onResume?: AccountHandoffResume;
+  onOpenSettings?: (card: SuperAgentActionCard) => void;
 }) {
   const { t } = useI18n();
   const descriptionId = useId();
+  if (card.kind === 'sign_in' || card.kind === 'upgrade_free' || card.kind === 'upgrade_go') {
+    return <AccountHandoffCard card={card} onResume={onResume} onOpenSettings={onOpenSettings} />;
+  }
   const meta = actionCardMeta(card.kind);
   return (
     <div className="om-sa-action-card" data-kind={card.kind} role="group" aria-label={t(meta.title)}>

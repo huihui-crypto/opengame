@@ -4,8 +4,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SuperAgentActionCard, SuperAgentChat } from '../../../shared/super-agent';
 import { I18nProvider } from '../i18n/I18n';
+import { gatewayRequest } from '../motion/gatewayClient';
 import { workspacePageHref } from '../motion/workspacePageRouting';
 import { ExecutionTimeline } from './ExecutionTimeline';
+
+vi.mock('../motion/gatewayClient', () => ({ gatewayRequest: vi.fn(async () => ({ state: 'signed-out', consoleUrl: '' })) }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -96,13 +99,17 @@ describe('ExecutionTimeline inline action cards', () => {
     expect(container.textContent).toContain('Upgrade to OpenDesign Plus');
     expect(container.textContent).toContain('Top up OpenDesign balance');
 
-    const signInBtn = Array.from(container.querySelectorAll('button')).find(btn => btn.textContent?.trim() === 'Sign in');
+    const signInBtn = Array.from(container.querySelectorAll('button')).find(btn => btn.textContent?.trim() === 'Sign in & continue');
     expect(signInBtn).toBeTruthy();
     expect(signInBtn?.getAttribute('aria-describedby')).toBeTruthy();
     await act(async () => {
       signInBtn!.click();
     });
-    expect(onTriggerActionCard).toHaveBeenCalledWith(cards[1]);
+    expect(gatewayRequest).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'super_agent_signin', entryId: expect.any(String) });
+    expect(onTriggerActionCard).not.toHaveBeenCalled();
+    const topUpBtn = Array.from(container.querySelectorAll('button')).find(btn => btn.textContent?.trim() === 'Manage billing');
+    await act(async () => topUpBtn!.click());
+    expect(onTriggerActionCard).toHaveBeenCalledWith(cards[3]);
   });
 
   it('suppresses redundant generic sign_in cards when web_publish_sign_in is present in the same turn', async () => {
