@@ -15,14 +15,17 @@ export function AccountHandoffCard({ card, handoffKey, onResume, onOpenSettings 
   const { t } = useI18n();
   const descriptionId = useId();
   const { state, alreadySignedIn, start, retry, cancel, refresh } = useAccountHandoff(card, onResume, handoffKey);
-  const signIn = card.kind === 'sign_in';
-  let title = t(signIn ? 'Sign in with OpenDesign' : 'Upgrade to OpenDesign Plus');
-  let description = t(signIn
-    ? "Sign in to generate AI images, video, music and voice. I'll continue automatically once you're signed in."
-    : card.kind === 'upgrade_go'
-      ? "Go plan does not include AI media generation. Upgrade to Plus and I'll continue automatically."
-      : "Free plan does not include AI media generation. Upgrade to Plus and I'll continue automatically.");
-  let label = t(signIn ? 'Sign in & continue' : 'Upgrade to Plus');
+  const publish = card.kind === 'web_publish_sign_in';
+  const signIn = card.kind === 'sign_in' || publish;
+  let title = t(publish ? 'Sign in to publish online' : signIn ? 'Sign in with OpenDesign' : 'Upgrade to OpenDesign Plus');
+  let description = t(publish
+    ? "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in."
+    : signIn
+      ? "Sign in to generate AI images, video, music and voice. I'll continue automatically once you're signed in."
+      : card.kind === 'upgrade_go'
+        ? "Go plan does not include AI media generation. Upgrade to Plus and I'll continue automatically."
+        : "Free plan does not include AI media generation. Upgrade to Plus and I'll continue automatically.");
+  let label = t(publish ? 'Sign in & publish' : signIn ? 'Sign in & continue' : 'Upgrade to Plus');
   let action = () => void start(card);
   let secondary: 'cancel' | 'refresh' | 'settings' | undefined;
   let link: string | undefined;
@@ -30,7 +33,7 @@ export function AccountHandoffCard({ card, handoffKey, onResume, onOpenSettings 
 
   switch (state.status) {
     case 'idle':
-      if (alreadySignedIn) { title = t("You're signed in"); description = ''; label = t('Continue'); }
+      if (alreadySignedIn) { title = t("You're signed in"); description = ''; label = t(publish ? 'Publish' : 'Continue'); }
       else if (!signIn) secondary = 'settings';
       break;
     case 'starting':
@@ -55,7 +58,7 @@ export function AccountHandoffCard({ card, handoffKey, onResume, onOpenSettings 
       break;
     case 'resuming':
     case 'done':
-      title = t('Signed in — continuing your request'); description = ''; label = '';
+      title = t(publish ? 'Signed in — publishing again' : 'Signed in — continuing your request'); description = ''; label = '';
       break;
     case 'failed':
       title = t(state.reason === 'timeout' ? 'Sign-in timed out.'
@@ -76,7 +79,7 @@ export function AccountHandoffCard({ card, handoffKey, onResume, onOpenSettings 
   return (
     <div className="om-sa-action-card" data-kind={card.kind} data-state={state.status} role="group" aria-label={title}>
       <span className="om-sa-action-card-icon" aria-hidden="true">
-        <RemixIcon name={state.status === 'done' || state.status === 'resuming' ? 'checkbox-circle-line' : signIn ? 'account-circle-line' : 'sparkling-line'} size={18} />
+        <RemixIcon name={state.status === 'done' || state.status === 'resuming' ? 'checkbox-circle-line' : publish ? 'global-line' : signIn ? 'account-circle-line' : 'sparkling-line'} size={18} />
       </span>
       <div className="om-sa-action-card-copy" aria-live="polite">
         <strong>{title}</strong>

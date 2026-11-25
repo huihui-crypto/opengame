@@ -23,7 +23,15 @@ function persisted(state: AccountHandoffState) {
   return ['starting', 'signed_in', 'authorizing', 'opening_plan', 'awaiting_upgrade', 'failed'].includes(state.status);
 }
 
+/** Publish cards reuse the Cloud Share sign-in hooks so attribution matches the publish popover. */
+export function accountHandoffSignInHook(card: SuperAgentActionCard) {
+  if (card.kind !== 'web_publish_sign_in') return 'super_agent_signin' as const;
+  return card.targetKind === 'game' ? 'game_publish_signin' as const : 'cloud_share_signin' as const;
+}
+
 export function useAccountHandoff(card: SuperAgentActionCard, onResume?: AccountHandoffResume, handoffKey = card.id) {
+  const signInOnly = card.kind === 'web_publish_sign_in';
+  const hookId = accountHandoffSignInHook(card);
   const [state, setState] = useState<AccountHandoffState>({ status: 'idle' });
   const [alreadySignedIn, setAlreadySignedIn] = useState(false);
   const current = useRef(state);
@@ -55,10 +63,10 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
   // Right after sign-in the connector may report signed-in before its first billing read lands (no plan yet).
   // Read once with refresh so Free/Go accounts are not mistaken for "unknown plan" and resumed without the plans page.
   const withPlan = useCallback(async (summary: AccountSummary) => (
-    summary.state === 'signed-in' && !summary.billingUnavailable && !summary.plan
+    !signInOnly && summary.state === 'signed-in' && !summary.billingUnavailable && !summary.plan
       ? gatewayRequest<AccountSummary>('settings/account?refresh=true').catch(() => summary)
       : summary
-  ), []);
+  ), [signInOnly]);
   const notify = useCallback(() => {
     notifyProvidersChanged();
     window.dispatchEvent(new Event('motion:account-changed'));
@@ -73,19 +81,19 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
       let summary = await gatewayRequest<AccountSummary>('settings/account');
       if (!isCurrent(run)) return;
       if (summary.state !== 'signed-in') {
-        summary = await gatewayRequest<AccountSummary>('settings/account/login', 'POST', { hookId: 'super_agent_signin', entryId: entryId.current });
+        summary = await gatewayRequest<AccountSummary>('settings/account/login', 'POST', { hookId, entryId: entryId.current });
       }
       if (!isCurrent(run)) return;
       summary = await withPlan(summary);
       if (!isCurrent(run)) return;
       if (summary.state === 'signed-in') notify();
-      const next = accountHandoffReducer({ status: 'starting' }, summary);
+      const next = accountHandoffReducer({ status: 'starting' }, summary, { signInOnly });
       if (next.status === 'opening_plan') deadline.current = Date.now() + UPGRADE_TIMEOUT;
       transition(next);
     } catch (error) {
       if (isCurrent(run)) transition({ status: 'failed', reason: 'start_failed', message: error instanceof Error ? error.message : undefined });
     }
-  }, [isCurrent, notify, transition, withPlan]);
+  }, [hookId, isCurrent, notify, signInOnly, transition, withPlan]);
 
   useEffect(() => {
     mounted.current = true;
@@ -106,11 +114,12 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     // A restored card never resumes by itself. Its initial read only changes the idle CTA.
     void gatewayRequest<AccountSummary>('settings/account').then(summary => {
       if (isCurrent(run) && current.current.status === 'idle') {
-        setAlreadySignedIn(summary.state === 'signed-in' && !summary.billingUnavailable && planMediaEntitlement(summary.plan) === 'included');
+        setAlreadySignedIn(summary.state === 'signed-in'
+          && (signInOnly || (!summary.billingUnavailable && planMediaEntitlement(summary.plan) === 'included')));
       }
     }).catch(() => {});
     return () => { mounted.current = false; generation.current++; };
-  }, [handoffKey, isCurrent, runStart]);
+  }, [handoffKey, isCurrent, runStart, signInOnly]);
 
   const start = useCallback(async (target: SuperAgentActionCard = card) => {
     if (!mounted.current || !['idle', 'failed'].includes(current.current.status)) return;
@@ -144,7 +153,7 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
       if (!isCurrent(run) || current.current.status !== previous.status) return;
       if (!upgrade) summary = await withPlan(summary);
       if (!isCurrent(run) || current.current.status !== previous.status) return;
-      const next = accountHandoffReducer(current.current, summary);
+      const next = accountHandoffReducer(current.current, summary, { signInOnly });
       if (summary.state === 'signed-in' && (previous.status === 'authorizing' || next.status === 'resuming')) notify();
       if (next.status === 'opening_plan') deadline.current = Date.now() + UPGRADE_TIMEOUT;
       transition(next);
@@ -153,7 +162,7 @@ export function useAccountHandoff(card: SuperAgentActionCard, onResume?: Account
     } finally {
       if (polling.current === request) polling.current = null;
     }
-  }, [isCurrent, notify, transition, withPlan]);
+  }, [isCurrent, notify, signInOnly, transition, withPlan]);
 
   useEffect(() => {
     if (state.status !== 'opening_plan') return;

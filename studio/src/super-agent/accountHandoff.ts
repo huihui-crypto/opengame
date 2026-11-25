@@ -16,14 +16,15 @@ export function planMediaEntitlement(plan?: string): 'included' | 'not-included'
   return 'unknown';
 }
 
-export function accountHandoffReducer(state: AccountHandoffState, summary: AccountSummary): AccountHandoffState {
+/** Publish sign-in cards only need a signed-in account; plan entitlement never applies to them. */
+export function accountHandoffReducer(state: AccountHandoffState, summary: AccountSummary, options: { signInOnly?: boolean } = {}): AccountHandoffState {
   if (state.status === 'awaiting_upgrade' || (state.status === 'failed' && state.phase === 'upgrade')) {
     return summary.state === 'signed-in' && !summary.billingUnavailable && planMediaEntitlement(summary.plan) === 'included'
       ? { status: 'resuming', plan: summary.plan } : state;
   }
   if (state.status !== 'starting' && state.status !== 'authorizing' && state.status !== 'signed_in') return state;
   if (summary.state === 'signed-in') {
-    return !summary.billingUnavailable && planMediaEntitlement(summary.plan) === 'not-included'
+    return !options.signInOnly && !summary.billingUnavailable && planMediaEntitlement(summary.plan) === 'not-included'
       ? { status: 'opening_plan' } : { status: 'resuming', plan: summary.plan };
   }
   if (summary.state === 'authorizing') {

@@ -981,7 +981,6 @@
     "Configure media provider": "配置媒体模型供应商",
     "Open Model providers to sign in or update your API key, then reply here to continue.": "打开模型供应商设置以登录账号或更新 API 密钥，完成后在此回复即可继续。",
     "Sign in to publish online": "登录以发布到线上",
-    "Sign in with OpenDesign to publish a shareable web link.": "登录 OpenDesign 账号即可发布可分享的线上网页链接。",
     "Sign in & publish": "登录并发布",
     "Any screen layout": "不限方向",
     "Describe how to remix {title}, or send as is": "描述想如何改编《{title}》，或直接发送做同款",
@@ -1071,7 +1070,11 @@
     "If you've already paid, click Check again; otherwise reopen the plans.": "如果你已付款，请点击“重新检查”；否则请重新打开套餐页。",
     "Reopen plans": "重新打开套餐页",
     "Check again": "重新检查",
-    "Your browser didn't open — use Continue in browser.": "浏览器未打开，请点击“在浏览器继续”。"
+    "Your browser didn't open — use Continue in browser.": "浏览器未打开，请点击“在浏览器继续”。",
+    "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "登录 OpenDesign 获取可分享的网页链接，登录后我会自动重新发布。",
+    "Publish": "发布",
+    "Signed in — publishing again": "已登录，正在重新发布",
+    "Signed in — please publish again.": "已登录，请重新发布。"
   },
   "ja": {
     "Play again": "もう一度遊ぶ",
@@ -2055,7 +2058,6 @@
     "Configure media provider": "メディアプロバイダーを設定",
     "Open Model providers to sign in or update your API key, then reply here to continue.": "モデルプロバイダーを開いてサインインまたは API キーを更新し、ここで返信して続行してください。",
     "Sign in to publish online": "サインインしてオンライン公開",
-    "Sign in with OpenDesign to publish a shareable web link.": "OpenDesign にサインインして共有可能な Web リンクを公開します。",
     "Sign in & publish": "サインインして公開",
     "Any screen layout": "向き指定なし",
     "Describe how to remix {title}, or send as is": "「{title}」のアレンジ内容を入力、またはそのまま送信してリミックス",
@@ -2145,7 +2147,11 @@
     "If you've already paid, click Check again; otherwise reopen the plans.": "お支払い済みの場合は「再確認」をクリックしてください。まだの場合はプランを開き直してください。",
     "Reopen plans": "プランを開き直す",
     "Check again": "再確認",
-    "Your browser didn't open — use Continue in browser.": "ブラウザーが開きませんでした。「ブラウザーで続行」を使ってください。"
+    "Your browser didn't open — use Continue in browser.": "ブラウザーが開きませんでした。「ブラウザーで続行」を使ってください。",
+    "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "OpenDesign にサインインすると共有できるウェブリンクを取得できます。サインイン後、自動で再公開します。",
+    "Publish": "公開",
+    "Signed in — publishing again": "サインイン済み — 再公開しています",
+    "Signed in — please publish again.": "サインインしました。もう一度公開してください。"
   },
   "ko": {
     "Play again": "다시 플레이",
@@ -3129,7 +3135,6 @@
     "Configure media provider": "미디어 공급자 설정",
     "Open Model providers to sign in or update your API key, then reply here to continue.": "모델 공급자를 열어 로그인하거나 API 키를 업데이트한 뒤 여기에 답장해 계속하세요.",
     "Sign in to publish online": "로그인하여 온라인 게시",
-    "Sign in with OpenDesign to publish a shareable web link.": "OpenDesign에 로그인하여 공유 가능한 웹 링크를 게시하세요.",
     "Sign in & publish": "로그인 및 게시",
     "Any screen layout": "방향 제한 없음",
     "Describe how to remix {title}, or send as is": "「{title}」 리믹스 방향을 입력하거나 바로 전송하세요",
@@ -3219,7 +3224,11 @@
     "If you've already paid, click Check again; otherwise reopen the plans.": "이미 결제했다면 '다시 확인'을 클릭하세요. 아직 결제하지 않았다면 요금제를 다시 여세요.",
     "Reopen plans": "요금제 다시 열기",
     "Check again": "다시 확인",
-    "Your browser didn't open — use Continue in browser.": "브라우저가 열리지 않았어요. '브라우저에서 계속'을 이용하세요."
+    "Your browser didn't open — use Continue in browser.": "브라우저가 열리지 않았어요. '브라우저에서 계속'을 이용하세요.",
+    "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "OpenDesign에 로그인하면 공유 가능한 웹 링크를 받을 수 있습니다. 로그인하면 자동으로 다시 게시할게요.",
+    "Publish": "게시",
+    "Signed in — publishing again": "로그인 완료 — 다시 게시하는 중",
+    "Signed in — please publish again.": "로그인했습니다. 다시 게시해 주세요."
   },
   "de": {
     "Play again": "Erneut spielen",
@@ -4206,7 +4215,6 @@
     "Configure media provider": "Medienanbieter konfigurieren",
     "Open Model providers to sign in or update your API key, then reply here to continue.": "Öffne Modellanbieter, um dich anzumelden oder deinen API-Schlüssel zu aktualisieren, und antworte dann hier.",
     "Sign in to publish online": "Zum Online-Veröffentlichen anmelden",
-    "Sign in with OpenDesign to publish a shareable web link.": "Melde dich bei OpenDesign an, um einen teilbaren Weblink zu veröffentlichen.",
     "Sign in & publish": "Anmelden & veröffentlichen",
     "Any screen layout": "Beliebige Ausrichtung",
     "Describe how to remix {title}, or send as is": "Beschreibe deine Anpassungen für „{title}“ oder sende direkt für einen Remix",
@@ -4296,7 +4304,11 @@
     "If you've already paid, click Check again; otherwise reopen the plans.": "Wenn du bereits bezahlt hast, klicke auf „Erneut prüfen“. Andernfalls öffne die Tarife erneut.",
     "Reopen plans": "Tarife erneut öffnen",
     "Check again": "Erneut prüfen",
-    "Your browser didn't open — use Continue in browser.": "Dein Browser wurde nicht geöffnet. Nutze „Im Browser fortfahren“."
+    "Your browser didn't open — use Continue in browser.": "Dein Browser wurde nicht geöffnet. Nutze „Im Browser fortfahren“.",
+    "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "Melde dich bei OpenDesign an, um einen teilbaren Weblink zu erhalten. Nach der Anmeldung veröffentliche ich automatisch erneut.",
+    "Publish": "Veröffentlichen",
+    "Signed in — publishing again": "Angemeldet — wird erneut veröffentlicht",
+    "Signed in — please publish again.": "Angemeldet — bitte erneut veröffentlichen."
   },
   "fr": {
     "Play again": "Rejouer",
@@ -5283,7 +5295,6 @@
     "Configure media provider": "Configurer le fournisseur média",
     "Open Model providers to sign in or update your API key, then reply here to continue.": "Ouvrez Fournisseurs de modèles pour vous connecter ou mettre à jour votre clé API, puis répondez ici.",
     "Sign in to publish online": "Se connecter pour publier en ligne",
-    "Sign in with OpenDesign to publish a shareable web link.": "Connectez-vous à OpenDesign pour publier un lien web partageable.",
     "Sign in & publish": "Se connecter et publier",
     "Any screen layout": "Toute orientation",
     "Describe how to remix {title}, or send as is": "Décrivez comment remixer « {title} », ou envoyez tel quel",
@@ -5373,7 +5384,11 @@
     "If you've already paid, click Check again; otherwise reopen the plans.": "Si vous avez déjà payé, cliquez sur « Vérifier à nouveau » ; sinon, rouvrez les offres.",
     "Reopen plans": "Rouvrir les offres",
     "Check again": "Vérifier à nouveau",
-    "Your browser didn't open — use Continue in browser.": "Votre navigateur ne s’est pas ouvert. Utilisez « Continuer dans le navigateur »."
+    "Your browser didn't open — use Continue in browser.": "Votre navigateur ne s’est pas ouvert. Utilisez « Continuer dans le navigateur ».",
+    "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "Connectez-vous à OpenDesign pour obtenir un lien web partageable. Je republierai automatiquement une fois connecté.",
+    "Publish": "Publier",
+    "Signed in — publishing again": "Connexion réussie — nouvelle publication en cours",
+    "Signed in — please publish again.": "Connecté — veuillez publier à nouveau."
   },
   "ru": {
     "Play again": "Сыграть ещё",
@@ -6362,7 +6377,6 @@
     "Configure media provider": "Настроить провайдера медиа",
     "Open Model providers to sign in or update your API key, then reply here to continue.": "Откройте «Провайдеры моделей», чтобы войти или обновить API-ключ, затем ответьте здесь.",
     "Sign in to publish online": "Войдите для публикации онлайн",
-    "Sign in with OpenDesign to publish a shareable web link.": "Войдите в OpenDesign, чтобы опубликовать общую веб-ссылку.",
     "Sign in & publish": "Войти и опубликовать",
     "Any screen layout": "Любая ориентация",
     "Describe how to remix {title}, or send as is": "Опишите, как изменить «{title}», или отправьте сразу для ремикса",
@@ -6452,7 +6466,11 @@
     "If you've already paid, click Check again; otherwise reopen the plans.": "Если вы уже оплатили, нажмите «Проверить снова». Иначе снова откройте тарифы.",
     "Reopen plans": "Открыть тарифы снова",
     "Check again": "Проверить снова",
-    "Your browser didn't open — use Continue in browser.": "Браузер не открылся — нажмите «Продолжить в браузере»."
+    "Your browser didn't open — use Continue in browser.": "Браузер не открылся — нажмите «Продолжить в браузере».",
+    "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "Войдите в OpenDesign, чтобы получить ссылку для публикации. После входа я автоматически опубликую снова.",
+    "Publish": "Опубликовать",
+    "Signed in — publishing again": "Вход выполнен — публикую снова",
+    "Signed in — please publish again.": "Вход выполнен — опубликуй снова."
   },
   "es": {
     "Play again": "Volver a jugar",
@@ -7439,7 +7457,6 @@
     "Configure media provider": "Configurar proveedor multimedia",
     "Open Model providers to sign in or update your API key, then reply here to continue.": "Abre Proveedores de modelos para iniciar sesión o actualizar tu clave API y responde aquí para continuar.",
     "Sign in to publish online": "Inicia sesión para publicar en línea",
-    "Sign in with OpenDesign to publish a shareable web link.": "Inicia sesión en OpenDesign para publicar un enlace web compartible.",
     "Sign in & publish": "Iniciar sesión y publicar",
     "Any screen layout": "Cualquier orientación",
     "Describe how to remix {title}, or send as is": "Describe cómo remezclar «{title}» o envía directamente tal cual",
@@ -7529,7 +7546,11 @@
     "If you've already paid, click Check again; otherwise reopen the plans.": "Si ya has pagado, haz clic en «Comprobar de nuevo»; de lo contrario, vuelve a abrir los planes.",
     "Reopen plans": "Volver a abrir los planes",
     "Check again": "Comprobar de nuevo",
-    "Your browser didn't open — use Continue in browser.": "Tu navegador no se abrió. Usa «Continuar en el navegador»."
+    "Your browser didn't open — use Continue in browser.": "Tu navegador no se abrió. Usa «Continuar en el navegador».",
+    "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "Inicia sesión en OpenDesign para obtener un enlace web para compartir. Volveré a publicar automáticamente cuando inicies sesión.",
+    "Publish": "Publicar",
+    "Signed in — publishing again": "Sesión iniciada — publicando de nuevo",
+    "Signed in — please publish again.": "Sesión iniciada — vuelve a publicar."
   },
   "pt-BR": {
     "Play again": "Jogar novamente",
@@ -8516,7 +8537,6 @@
     "Configure media provider": "Configurar provedor de mídia",
     "Open Model providers to sign in or update your API key, then reply here to continue.": "Abra Provedores de modelos para entrar ou atualizar sua chave de API e responda aqui para continuar.",
     "Sign in to publish online": "Entre para publicar online",
-    "Sign in with OpenDesign to publish a shareable web link.": "Entre no OpenDesign para publicar um link compartilhável na web.",
     "Sign in & publish": "Entrar e publicar",
     "Any screen layout": "Qualquer orientação",
     "Describe how to remix {title}, or send as is": "Descreva como remixar “{title}” ou envie direto como está",
@@ -8606,7 +8626,11 @@
     "If you've already paid, click Check again; otherwise reopen the plans.": "Se já pagou, clique em “Verificar novamente”; caso contrário, reabra os planos.",
     "Reopen plans": "Reabrir planos",
     "Check again": "Verificar novamente",
-    "Your browser didn't open — use Continue in browser.": "Seu navegador não abriu. Use “Continuar no navegador”."
+    "Your browser didn't open — use Continue in browser.": "Seu navegador não abriu. Use “Continuar no navegador”.",
+    "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "Entre no OpenDesign para obter um link da web compartilhável. Vou publicar de novo automaticamente quando você entrar.",
+    "Publish": "Publicar",
+    "Signed in — publishing again": "Login concluído — publicando novamente",
+    "Signed in — please publish again.": "Login concluído — publique novamente."
   },
   "it": {
     "Play again": "Gioca ancora",
@@ -9593,7 +9617,6 @@
     "Configure media provider": "Configura provider media",
     "Open Model providers to sign in or update your API key, then reply here to continue.": "Apri Provider di modelli per accedere o aggiornare la chiave API, poi rispondi qui per continuare.",
     "Sign in to publish online": "Accedi per pubblicare online",
-    "Sign in with OpenDesign to publish a shareable web link.": "Accedi a OpenDesign per pubblicare un link web condivisibile.",
     "Sign in & publish": "Accedi e pubblica",
     "Any screen layout": "Qualsiasi orientamento",
     "Describe how to remix {title}, or send as is": "Descrivi come remixare «{title}» oppure invia subito così com’è",
@@ -9683,7 +9706,11 @@
     "If you've already paid, click Check again; otherwise reopen the plans.": "Se hai già pagato, fai clic su «Verifica di nuovo»; altrimenti riapri i piani.",
     "Reopen plans": "Riapri i piani",
     "Check again": "Verifica di nuovo",
-    "Your browser didn't open — use Continue in browser.": "Il browser non si è aperto. Usa «Continua nel browser»."
+    "Your browser didn't open — use Continue in browser.": "Il browser non si è aperto. Usa «Continua nel browser».",
+    "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "Accedi a OpenDesign per ottenere un link web condivisibile. Dopo l'accesso ripubblicherò automaticamente.",
+    "Publish": "Pubblica",
+    "Signed in — publishing again": "Accesso effettuato — ripubblicazione in corso",
+    "Signed in — please publish again.": "Accesso effettuato — pubblica di nuovo."
   },
   "tr": {
     "Play again": "Tekrar oyna",
@@ -10667,7 +10694,6 @@
     "Configure media provider": "Medya sağlayıcısını yapılandır",
     "Open Model providers to sign in or update your API key, then reply here to continue.": "Giriş yapmak veya API anahtarınızı güncellemek için Model sağlayıcıları açın, ardından buraya yanıt verin.",
     "Sign in to publish online": "Çevrimiçi yayınlamak için giriş yap",
-    "Sign in with OpenDesign to publish a shareable web link.": "Paylaşılabilir bir web bağlantısı yayınlamak için OpenDesign ile giriş yapın.",
     "Sign in & publish": "Giriş yap ve yayınla",
     "Any screen layout": "Herhangi bir yön",
     "Describe how to remix {title}, or send as is": "“{title}” oyununu nasıl uyarlamak istediğini yaz veya doğrudan gönder",
@@ -10757,6 +10783,10 @@
     "If you've already paid, click Check again; otherwise reopen the plans.": "Ödeme yaptıysanız “Tekrar kontrol et”e tıklayın; aksi takdirde planları yeniden açın.",
     "Reopen plans": "Planları yeniden aç",
     "Check again": "Tekrar kontrol et",
-    "Your browser didn't open — use Continue in browser.": "Tarayıcınız açılmadı — “Tarayıcıda devam et”i kullanın."
+    "Your browser didn't open — use Continue in browser.": "Tarayıcınız açılmadı — “Tarayıcıda devam et”i kullanın.",
+    "Sign in with OpenDesign to get a shareable web link. I'll publish again automatically once you're signed in.": "Paylaşılabilir bir web bağlantısı almak için OpenDesign'a giriş yap. Giriş yaptığında otomatik olarak yeniden yayınlayacağım.",
+    "Publish": "Yayınla",
+    "Signed in — publishing again": "Giriş yapıldı — yeniden yayınlanıyor",
+    "Signed in — please publish again.": "Giriş yapıldı — lütfen yeniden yayınla."
   }
 }

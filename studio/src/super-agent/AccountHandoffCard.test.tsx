@@ -427,3 +427,65 @@ describe('AccountHandoffCard', () => {
     root = createRoot(container);
   });
 });
+
+describe('AccountHandoffCard — publish sign-in', () => {
+  const gameCard: SuperAgentActionCard = { id: 'action:web_publish_sign_in:game:g-1', kind: 'web_publish_sign_in', entry: 'agent_media_signed_out', provider: 'account', targetKind: 'game', targetId: 'g-1' };
+  const designCard: SuperAgentActionCard = { ...gameCard, id: 'action:web_publish_sign_in:design:p-1', targetKind: 'design', targetId: 'p-1' };
+
+  it.each(['free', 'go', 'plus', undefined])('signs in with the game publish hook and republishes once for plan %s', async plan => {
+    await render(gameCard);
+    expect(container.textContent).toContain('Sign in to publish online');
+    await click('Sign in & publish');
+    expect(request).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'game_publish_signin', entryId: expect.any(String) });
+    account = { state: 'signed-in', consoleUrl: '', ...(plan ? { plan } : {}) };
+    await tick(2_000);
+    // Publishing only needs a signed-in account: no plans page, no billing reread.
+    expect(request).not.toHaveBeenCalledWith('settings/account/subscription', expect.anything(), expect.anything());
+    expect(request).not.toHaveBeenCalledWith('settings/account?refresh=true');
+    expect(onResume).toHaveBeenCalledExactlyOnceWith(gameCard, { plan, key: gameCard.id });
+    expect(status()).toBe('done');
+    expect(container.textContent).toContain('Signed in — publishing again');
+    await tick(10_000);
+    await render({ ...gameCard });
+    expect(onResume).toHaveBeenCalledTimes(1);
+  });
+  it('uses the cloud share hook for non-game targets', async () => {
+    await render(designCard);
+    await click('Sign in & publish');
+    expect(request).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'cloud_share_signin', entryId: expect.any(String) });
+  });
+  it('offers Publish when already signed in on a Free plan and republishes without signing in', async () => {
+    account = { state: 'signed-in', plan: 'free', consoleUrl: '' };
+    await render(gameCard);
+    await click('Publish');
+    expect(request).not.toHaveBeenCalledWith('settings/account/login', expect.anything(), expect.anything());
+    expect(onResume).toHaveBeenCalledExactlyOnceWith(gameCard, { plan: 'free', key: gameCard.id });
+  });
+  it('times out publish sign-in, cancels the connector, and republishes after retry', async () => {
+    await render(gameCard);
+    await click('Sign in & publish');
+    await tick(5 * 60_000);
+    expect(status()).toBe('failed');
+    expect(container.textContent).toContain('Sign-in timed out.');
+    expect(request).toHaveBeenCalledWith('settings/account/cancel', 'POST');
+    expect(onResume).not.toHaveBeenCalled();
+    await click('Retry');
+    expect(status()).toBe('authorizing');
+    account = { state: 'signed-in', plan: 'go', consoleUrl: '' };
+    await tick(2_000);
+    expect(onResume).toHaveBeenCalledTimes(1);
+  });
+  it('keeps the card retryable when the republish fails, then republishes once', async () => {
+    account = { state: 'signed-in', plan: 'plus', consoleUrl: '' };
+    onResume.mockRejectedValueOnce(new Error('Could not continue the conversation. Try again.'));
+    await render(gameCard);
+    await click('Publish');
+    expect(status()).toBe('failed');
+    expect(container.textContent).toContain('Could not continue the conversation. Try again.');
+    await click('Retry');
+    expect(status()).toBe('done');
+    expect(onResume).toHaveBeenCalledTimes(2);
+    await render({ ...gameCard });
+    expect(onResume).toHaveBeenCalledTimes(2);
+  });
+});

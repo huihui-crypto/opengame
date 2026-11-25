@@ -36,7 +36,6 @@ import { RouteSurfaceFallback } from '../motion/RouteSurfaceFallback';
 import { consumeSuperAgentHandoff, queueSuperAgentHandoff, subscribeSuperAgentHandoff } from '../motion/superAgentHandoff';
 import { readSuperAgentPromptLink, withoutSuperAgentPromptLink } from './superAgentPromptLink';
 import { bundledGames, communityGames, gameApi } from '../motion/game/gameCatalog';
-import { designClient } from '../design/designClient';
 import { isMultiplayerGameArtifact, localizedGameTitle, toGameArtifact, toGameResourceAttachment } from '../motion/game/gameSuperAgent';
 import { gatewayRequest } from '../motion/gatewayClient';
 import { openAgentRuntimesSettings, useAgentRuntimes } from '../motion/useAgentRuntimes';
@@ -379,8 +378,6 @@ export function SuperAgentWorkspace({
   const hasLoadedListRef = useRef(Boolean(initialCachedConversations));
   const lastActivationRefreshRef = useRef(0);
   const [activeChat, setActiveChat] = useState<SuperAgentChat | null>(initialCachedChat);
-  const activeChatIdRef = useRef<string | null>(initialCachedChat?.id ?? null);
-  activeChatIdRef.current = activeChat?.id ?? null;
   const [loadingChat, setLoadingChat] = useState(() => Boolean(active && chatId && !initialCachedChat));
   const [loadFailed, setLoadFailed] = useState(false);
   const [chatRetry, setChatRetry] = useState(0);
@@ -1551,17 +1548,25 @@ export function SuperAgentWorkspace({
     }
   }, [handlePlayGame]);
 
-  const handleResumeAfterAccount = async (_card: SuperAgentActionCard, { plan, key }: { plan?: string; key: string }) => {
+  const handleResumeAfterAccount = async (card: SuperAgentActionCard, { plan, key }: { plan?: string; key: string }) => {
     // One stable requestId per card instance: a retry after a lost response replays instead of enqueueing twice.
     let requestId = resumeRequestIds.current.get(key);
     if (!requestId) {
       requestId = `sa-resume-${typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Date.now().toString(36)}`;
       resumeRequestIds.current.set(key, requestId);
     }
-    const continued = await handleSend(t('Signed in — please continue.'), {
+    const publish = card.kind === 'web_publish_sign_in';
+    const target = publish
+      ? [card.targetKind, card.targetId].filter(Boolean).join(' ')
+      : '';
+    const continued = await handleSend(t(publish ? 'Signed in — please publish again.' : 'Signed in — please continue.'), {
       requestId,
-      hiddenInstructions: 'The user just signed in to OpenDesign' + (plan ? ` (plan: ${plan})` : '')
-        + '. Retry the media generation that was blocked by sign-in or plan in the previous turn, with the same brief and settings. Before any paid generation, still state the expected cost as the existing rules require; do not ask the user to reply again.',
+      hiddenInstructions: publish
+        ? 'The user just signed in to OpenDesign. Retry the web publish that failed with sign-in required in the previous turn'
+          + (target ? ` (target: ${target})` : '')
+          + ', calling the same publish tool with the same target and arguments. Do not regenerate, rebuild or edit the content first; publish it as it is now and share the resulting link. Do not ask the user to reply again.'
+        : 'The user just signed in to OpenDesign' + (plan ? ` (plan: ${plan})` : '')
+          + '. Retry the media generation that was blocked by sign-in or plan in the previous turn, with the same brief and settings. Before any paid generation, still state the expected cost as the existing rules require; do not ask the user to reply again.',
       followUpBehavior: 'queue',
       overrideAttachments: [],
       keepDraftAttachments: true,
@@ -1581,126 +1586,8 @@ export function SuperAgentWorkspace({
   };
 
   const handleTriggerActionCard = useCallback(async (card: SuperAgentActionCard) => {
-    if (card.kind === 'sign_in' || card.kind === 'upgrade_free' || card.kind === 'upgrade_go') return;
-    const originChatId = activeChat?.id ?? null;
-    if (card.kind === 'web_publish_sign_in') {
-      if (card.targetKind === 'game' && card.targetId) {
-        const artifactId = `game:${card.targetId}`;
-        if (viewerArtifacts.some(item => item.id === artifactId)) {
-          setOpenTabIds(prev => (prev.includes(artifactId) ? prev : [...prev, artifactId]));
-          setActiveTabId(artifactId);
-          setViewerOpen(true);
-          setPendingDeployArtifactId(artifactId);
-          return;
-        }
-        try {
-          const catalog = await gameApi.catalog();
-          if (activeChatIdRef.current !== originChatId) return;
-          const matched = catalog.games?.find(item => item.id === card.targetId);
-          if (matched) {
-            await handleDeployGame(matched);
-            return;
-          }
-        } catch {
-          if (activeChatIdRef.current !== originChatId) return;
-          /* fall back to account settings below */
-        }
-      } else if (card.targetKind === 'design' && card.targetId) {
-        const artifactId = `design:${card.targetId}`;
-        if (viewerArtifacts.some(item => item.id === artifactId)) {
-          setOpenTabIds(prev => (prev.includes(artifactId) ? prev : [...prev, artifactId]));
-          setActiveTabId(artifactId);
-          setViewerOpen(true);
-          setPendingDeployArtifactId(artifactId);
-          return;
-        }
-        try {
-          const { project } = await designClient.getProject(card.targetId);
-          if (activeChatIdRef.current !== originChatId) return;
-          if (project?.id) {
-            const entry = project.entry || 'index.html';
-            const now = Date.now();
-            const fullArtifact: SuperAgentArtifact = {
-              id: artifactId,
-              kind: 'design-project',
-              title: project.title || project.id,
-              subtitle: project.scenario || 'Design Studio',
-              projectId: project.id,
-              scenario: project.scenario,
-              entry,
-              revision: project.revision,
-              url: designRoutes.raw(project.id, entry),
-              createdAt: now,
-              updatedAt: now,
-            };
-            if (activeChat && activeChat.id === originChatId) {
-              try {
-                const res = await updateSuperAgentChat(activeChat.id, { addArtifact: fullArtifact });
-                if (activeChatIdRef.current !== originChatId) return;
-                applyChatSnapshot(res.conversation, false);
-                setOpenTabIds(prev => (prev.includes(artifactId) ? prev : [...prev, artifactId]));
-                setActiveTabId(artifactId);
-                setViewerOpen(true);
-                setPendingDeployArtifactId(artifactId);
-                return;
-              } catch {
-                if (activeChatIdRef.current !== originChatId) return;
-                /* fall back to local preview artifact state */
-              }
-            }
-            openLocalPreviewArtifact(fullArtifact);
-            setPendingDeployArtifactId(artifactId);
-            return;
-          }
-        } catch {
-          if (activeChatIdRef.current !== originChatId) return;
-          /* fall back to account settings below */
-        }
-      } else if (card.targetKind === 'motion' && card.targetId) {
-        const artifactId = `motion:${card.targetId}`;
-        if (viewerArtifacts.some(item => item.id === artifactId)) {
-          setOpenTabIds(prev => (prev.includes(artifactId) ? prev : [...prev, artifactId]));
-          setActiveTabId(artifactId);
-          setViewerOpen(true);
-          setPendingDeployArtifactId(artifactId);
-          return;
-        }
-        const now = Date.now();
-        const motionArtifact: SuperAgentArtifact = {
-          id: artifactId,
-          kind: 'motion-project',
-          title: card.targetId,
-          subtitle: 'Motion Studio',
-          projectId: card.targetId,
-          createdAt: now,
-          updatedAt: now,
-        };
-        if (activeChat && activeChat.id === originChatId) {
-          try {
-            const res = await updateSuperAgentChat(activeChat.id, { addArtifact: motionArtifact });
-            if (activeChatIdRef.current !== originChatId) return;
-            applyChatSnapshot(res.conversation, false);
-            setOpenTabIds(prev => (prev.includes(artifactId) ? prev : [...prev, artifactId]));
-            setActiveTabId(artifactId);
-            setViewerOpen(true);
-            setPendingDeployArtifactId(artifactId);
-            return;
-          } catch {
-            if (activeChatIdRef.current !== originChatId) return;
-          }
-        }
-        openLocalPreviewArtifact(motionArtifact);
-        setPendingDeployArtifactId(artifactId);
-        return;
-      }
-      if (onOpenProviderSettings) {
-        onOpenProviderSettings('account', card.entry);
-      } else {
-        onOpenAccountSettings?.();
-      }
-      return;
-    }
-
+    // Account cards (including publish sign-in) complete inside the card and resume via handleResumeAfterAccount.
+    if (card.kind === 'sign_in' || card.kind === 'upgrade_free' || card.kind === 'upgrade_go' || card.kind === 'web_publish_sign_in') return;
     if (card.kind === 'configure_key') {
       if (onOpenProviderSettings) {
         onOpenProviderSettings(card.provider, card.entry);
@@ -1717,7 +1604,7 @@ export function SuperAgentWorkspace({
     } else {
       onOpenModelSettings?.();
     }
-  }, [activeChat, applyChatSnapshot, handleDeployGame, onOpenAccountSettings, onOpenModelSettings, onOpenProviderSettings, openLocalPreviewArtifact, viewerArtifacts]);
+  }, [onOpenAccountSettings, onOpenModelSettings, onOpenProviderSettings]);
 
   const handleUseGameInAgent = useCallback(async (artifact: SuperAgentArtifact) => {
     if (isMultiplayerGameArtifact(artifact)) return;

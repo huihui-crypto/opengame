@@ -510,6 +510,71 @@ it('keeps the account card retryable when continuing the conversation is rejecte
   expect(turnBodies[1].requestId).toBe(turnBodies[0].requestId);
 });
 
+it('republishes the same target once after signing in from the publish card', async () => {
+  clearSuperAgentCache();
+  const fallback = globalThis.fetch;
+  const currentChat: SuperAgentChat = {
+    ...sampleChat,
+    state: 'idle',
+    artifacts: [],
+    approvals: [],
+    activeArtifactId: undefined,
+    messages: [
+      { id: 'request-publish', role: 'user', text: 'Publish my game', createdAt: 1001 },
+      {
+        id: 'blocked-publish', role: 'tool', text: 'OPENDESIGN_SIGN_IN_REQUIRED', createdAt: 1002,
+        toolEvent: {
+          callId: 'publish-call', tool: 'openmotion_assets_use', label: 'Publish game', status: 'failed',
+          actionCard: { id: 'action:web_publish_sign_in:game:g-1', kind: 'web_publish_sign_in', entry: 'agent_media_signed_out', provider: 'account', targetKind: 'game', targetId: 'g-1' },
+        },
+      },
+      { id: 'explain-publish', role: 'assistant', text: 'Sign in to publish.', createdAt: 1003 },
+    ],
+  };
+  const onOpenProviderSettings = vi.fn();
+  const turnBodies: Array<{ text: string; hiddenInstructions: string; attachments: unknown[]; requestId: string }> = [];
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+    if (url === `${SUPER_AGENT_API}/chats/${CHAT_ID}` && (!init?.method || init.method === 'GET')) return json({ conversation: currentChat });
+    // A Free account can publish: the card must not route it through plans.
+    if (url === '/motion-api/settings/account') return json({ state: 'signed-in', plan: 'free', consoleUrl: '' });
+    if (url === `${SUPER_AGENT_API}/chats/${CHAT_ID}/turn` && init?.method === 'POST') {
+      turnBodies.push(JSON.parse(String(init.body)));
+      return json({ conversation: currentChat });
+    }
+    return fallback(input, init);
+  });
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en">
+        <SuperAgentWorkspace
+          active chatId={CHAT_ID} onChatIdChange={vi.fn()}
+          onOpenDesignProject={vi.fn()} onOpenMotionProject={vi.fn()} onOpenAsset={vi.fn()}
+          onOpenBrandKit={vi.fn()} onOpenAgentSettings={vi.fn()} onOpenMcp={vi.fn()}
+          onOpenProviderSettings={onOpenProviderSettings}
+        />
+      </I18nProvider>,
+    );
+  });
+  await flush();
+  const publishCard = () => container.querySelector('.om-sa-action-card[data-kind="web_publish_sign_in"]')!;
+  const button = Array.from(publishCard().querySelectorAll('button')).find(item => item.textContent === 'Publish')!;
+  expect(button).toBeTruthy();
+  await act(async () => button.click());
+  await flush();
+  expect(publishCard().getAttribute('data-state')).toBe('done');
+  expect(onOpenProviderSettings).not.toHaveBeenCalled();
+  expect(turnBodies).toHaveLength(1);
+  expect(turnBodies[0].text).toBe('Signed in — please publish again.');
+  expect(turnBodies[0].hiddenInstructions).toContain('Retry the web publish that failed with sign-in required');
+  expect(turnBodies[0].hiddenInstructions).toContain('(target: game g-1)');
+  expect(turnBodies[0].hiddenInstructions).toContain('Do not regenerate, rebuild or edit the content first');
+  expect(turnBodies[0].hiddenInstructions).not.toContain('media generation');
+  expect(turnBodies[0].attachments).toEqual([]);
+  expect(turnBodies[0].requestId).toMatch(/^sa-resume-/);
+});
+
 function getComposerEditor(rootEl: ParentNode = container): HTMLElement {
   return rootEl.querySelector<HTMLElement>('.om-sa-composer .om-sa-composer-editor')!;
 }

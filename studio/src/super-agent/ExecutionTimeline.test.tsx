@@ -150,7 +150,9 @@ describe('ExecutionTimeline inline action cards', () => {
     await act(async () => {
       publishBtn!.click();
     });
-    expect(onTriggerActionCard).toHaveBeenCalledWith(cards[0]);
+    // Signs in inside the card with the game publish hook instead of jumping to settings.
+    expect(gatewayRequest).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'game_publish_signin', entryId: expect.any(String) });
+    expect(onTriggerActionCard).not.toHaveBeenCalled();
   });
 
   it('suppresses stale action cards on older turns once a newer turn exists', async () => {
