@@ -2,7 +2,7 @@ import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { gameGenres, gameSettings, gameStyles, type GameCard, type GameCreated, type GameGenre, type GameSetting, type GameStyle } from '../../../../shared/game-contract';
+import { gameGenres, gameSettings, gameStyles, isReadyBuiltInTemplate, type GameCard, type GameCreated, type GameGenre, type GameSetting, type GameStyle } from '../../../../shared/game-contract';
 import { rankSearchResults } from '../../../../shared/fuzzy-search';
 import { buildSuperAgentHandoff } from '../../../../shared/capability-hub';
 import { preservePresentation } from '../../../../shared/workspace-url';
@@ -18,7 +18,7 @@ import { MotionIcon } from '../icons';
 import { projectHref } from '../workspaceRouting';
 import { Tooltip } from '../../components/ui/Tooltip';
 import { GameMasonry, interleavePortrait } from './GameMasonry';
-import { bundledGames, communityGames, communityRemixPrompt, composeBrief, coverUrl, formatPlays, gameApi, gameSource, storedInstruction, genreCovers, genreLabels, settingCovers, styleCovers, genrePlaceholders, isLocalOnly, playableUrl, rememberInstruction, settingLabels, styleLabels } from './gameCatalog';
+import { bundledGames, communityGames, communityRemixPrompt, composeBrief, coverUrl, formatPlays, gameApi, gameSource, isTopEarningGame, storedInstruction, genreCovers, genreLabels, settingCovers, styleCovers, genrePlaceholders, isLocalOnly, playableUrl, rememberInstruction, settingLabels, styleLabels, TOP_EARNING_TAG } from './gameCatalog';
 import { buildGameContextTags, buildGameHiddenInstructions, buildGameUserPrompt, toGameArtifact, toGameCapabilityRef } from './gameSuperAgent';
 import { optionId as optionFilter } from '../reporting';
 import { reportGameAction, reportGameClick, reportGameCreate, reportGameDetailShown, reportGameHandoffShown, reportGameSearch } from './gameTracking';
@@ -61,7 +61,7 @@ export function GameStudio({
   const [games, setGames] = useState<GameCard[]>(bundledGames);
   const [offline, setOffline] = useState(false);
   const [query, setQuery] = useState('');
-  const [category, setCategory] = useState<GameGenre | 'all' | 'portrait'>('all');
+  const [category, setCategory] = useState<GameGenre | 'all' | 'portrait' | 'top-earning'>('all');
   const [sort, setSort] = useState<Sort>('relevance');
   // The open project is tracked by id so polling updates reach it.
   // ?game=<id> opens that game's detail page directly (used by links from Assets and Super Agent).
@@ -144,7 +144,10 @@ export function GameStudio({
   const failure = (error: unknown) => error instanceof TypeError || offline
     ? t('The local game service is not available. Update OpenMotion and try again.')
     : t('The game could not be created: {reason}', { reason: (error as Error).message });
-  const started = (created: GameCreated): 'super_agent' | 'detail' => {
+  const started = (
+    created: GameCreated,
+    options?: { builtInTemplateRemix?: boolean },
+  ): 'super_agent' | 'detail' => {
     rememberInstruction(created.game.id, created.agentInstruction);
     statuses.current.set(created.game.id, created.game.status);
     setGames(list => [created.game, ...list.filter(game => game.id !== created.game.id)]);
@@ -154,7 +157,14 @@ export function GameStudio({
       setOpenIdState(null);
       const handoff = buildSuperAgentHandoff(toGameCapabilityRef(created.game, displayTitle), {
         prompt: buildGameUserPrompt(created.game, locale),
-        hiddenInstructions: buildGameHiddenInstructions(created.game, created.agentInstruction),
+        hiddenInstructions: buildGameHiddenInstructions(
+          created.game,
+          created.agentInstruction,
+          undefined,
+          options?.builtInTemplateRemix
+            ? { builtInTemplateRemix: true, hasUserPromptText: false, locale }
+            : undefined,
+        ),
         contextTags: buildGameContextTags(created.game, t),
         locale,
         newChat: true,
@@ -215,7 +225,8 @@ export function GameStudio({
       const created = game.external
         ? await gameApi.create({ prompt: communityRemixPrompt(game), genre: game.genre, style: game.style, setting: game.setting, multiplayer: false, orientation: game.orientation ?? 'landscape' })
         : await gameApi.remix(game.id);
-      reportGameCreate('remix', { game: created.game, handoff: started(created) }, { source: game });
+      const builtInTemplateRemix = isReadyBuiltInTemplate(game);
+      reportGameCreate('remix', { game: created.game, handoff: started(created, { builtInTemplateRemix }) }, { source: game });
     }
     catch (error) { reportGameCreate('remix', { error: createError(error) }, { source: game }); notify(failure(error), 'error'); }
   };
@@ -233,14 +244,17 @@ export function GameStudio({
     const needle = query.trim();
     // Explore lists templates and community games only; games made here live in Assets → Games.
     const byCategory = all.filter(game => game.source !== 'mine' && game.status === 'published'
-      && (category === 'all' || (category === 'portrait' ? game.orientation === 'portrait' : game.genre === category)));
+      && (category === 'all'
+        || (category === 'portrait' ? game.orientation === 'portrait'
+          : category === 'top-earning' ? isTopEarningGame(game)
+          : game.genre === category)));
     const list = needle
       ? rankSearchResults(byCategory, needle, game => ({
           id: game.id,
           title: game.i18n?.[locale]?.title ?? game.title,
           subtitle: t(genreLabels[game.genre]),
           description: game.i18n?.[locale]?.description ?? game.description,
-          tags: [game.genre, ...(game.style ? [game.style] : []), ...(game.setting ? [game.setting] : [])],
+          tags: [game.genre, ...(game.style ? [game.style] : []), ...(game.setting ? [game.setting] : []), ...(game.tags ?? [])],
           aliases: [
             game.title,
             game.description,
@@ -270,7 +284,12 @@ export function GameStudio({
   const rows = [
     ...(browsing ? [
       { id: 'featured', title: t('Templates'), icon: 'gamepad-line', games: visible },
-    ] : [{ id: 'all', title: category === 'all' ? t('All games') : category === 'portrait' ? t('Portrait games') : t('{genre} games', { genre: t(genreLabels[category]) }), icon: 'gamepad-line', games: visible }]),
+    ] : [{
+      id: 'all',
+      title: category === 'all' ? t('All games') : category === 'portrait' ? t('Portrait games') : category === 'top-earning' ? TOP_EARNING_TAG : t('{genre} games', { genre: t(genreLabels[category]) }),
+      icon: category === 'top-earning' ? 'sparkling-fill' : 'gamepad-line',
+      games: visible,
+    }]),
   ];
 
   const options: { id: string; label: string; cover?: string | null; selected: boolean; pick: () => void }[] = menu === 'genre'
@@ -328,8 +347,12 @@ export function GameStudio({
         <h2 className="om-title om-game-explore-title">{t('Explore templates')}</h2>
         <div className="om-game-filters">
           <div className="om-game-genres" role="tablist" aria-label={t('Category')}>
-            {(['all', ...gameGenres] as const).map(id => <Button key={id} variant="plain" role="tab" className="om-game-genre-chip" aria-selected={category === id} onClick={() => { if (category !== id) reportGameClick('game_market', 'category_select', null, optionFilter(id)); setCategory(id); }}>
-              {id === 'all' ? <RemixIcon name="layout-grid-line" size={15} /> : genreCovers[id] && <img src={genreCovers[id]!} alt="" />}{id === 'all' ? t('All') : t(genreLabels[id])}</Button>)}
+            <Button variant="plain" role="tab" className="om-game-genre-chip" aria-selected={category === 'all'} onClick={() => { if (category !== 'all') reportGameClick('game_market', 'category_select', null, optionFilter('all')); setCategory('all'); }}>
+              <RemixIcon name="layout-grid-line" size={15} />{t('All')}</Button>
+            <Button variant="plain" role="tab" className="om-game-genre-chip om-game-genre-chip--featured" aria-selected={category === 'top-earning'} onClick={() => { if (category !== 'top-earning') reportGameClick('game_market', 'category_select', null, optionFilter('top-earning')); setCategory('top-earning'); }}>
+              <RemixIcon name="sparkling-fill" size={15} />{TOP_EARNING_TAG}</Button>
+            {gameGenres.map(id => <Button key={id} variant="plain" role="tab" className="om-game-genre-chip" aria-selected={category === id} onClick={() => { if (category !== id) reportGameClick('game_market', 'category_select', null, optionFilter(id)); setCategory(id); }}>
+              {genreCovers[id] && <img src={genreCovers[id]!} alt="" />}{t(genreLabels[id])}</Button>)}
             <Button variant="plain" role="tab" className="om-game-genre-chip" aria-selected={category === 'portrait'} onClick={() => { if (category !== 'portrait') reportGameClick('game_market', 'category_select', null, optionFilter('portrait')); setCategory('portrait'); }}><RemixIcon name="smartphone-line" size={15} />{t('Portrait')}</Button>
           </div>
           <span className="om-game-selects">
@@ -391,12 +414,14 @@ function GameTile({ game, locale, onOpen }: { game: GameCard; locale: string; on
   // A draft has no cover until the Agent makes one; the genre artwork stands in.
   const cover = coverUrl(game) ?? (game.source === 'mine' ? genreCovers[game.genre] : null);
   const status = game.source === 'mine' ? statusLabels[game.status] : undefined;
+  const topEarning = isTopEarningGame(game);
   const label = pending(game) || game.status === 'failed' ? t('Show the Agent instruction for {title}', { title }) : t('Play {title}', { title });
   return <article className="om-game-tile" data-status={game.status} data-orientation={game.orientation === 'portrait' ? 'portrait' : undefined}>
     <Button variant="plain" className="om-game-tile-cover" onClick={onOpen} aria-label={label}>
       {/* Portrait games share the 16:9 card: the cover sits whole in the middle over a blurred copy of itself. */}
       {cover && game.orientation === 'portrait' && <img className="om-game-tile-backdrop" src={cover} alt="" loading="lazy" decoding="async" />}
       {cover ? <img src={cover} alt="" loading="lazy" decoding="async" /> : <span className="om-game-tile-placeholder">{title}</span>}
+      {topEarning && !status && !(game.external && !game.external.embeddable) && <span className="om-game-tag-featured"><RemixIcon name="sparkling-fill" size={12} />{TOP_EARNING_TAG}</span>}
       {game.orientation === 'portrait' && !game.multiplayer && <span className="om-game-badge"><RemixIcon name="smartphone-line" size={13} />{t('Portrait')}</span>}
       {status && <span className="om-game-status" data-tone={game.status}>{game.status === 'building' && <RemixIcon name="loader-4-line" size={13} />}{t(status)}</span>}
       {game.external && !game.external.embeddable && <span className="om-game-status"><RemixIcon name="external-link-line" size={13} />{t('External link')}</span>}
@@ -503,6 +528,7 @@ function GameProject({ game, offline, onClose, onRemix, onChange, onOpenMcp, onC
     <header className="om-game-project-top">
       <IconButton ref={close} variant="ghost" className="motion-icon-button" aria-label={t('All games')} onClick={onClose} icon={<RemixIcon name="arrow-left-line" size={18} />} />
       <h1 className="om-subtitle">{gameTitle(game)}</h1>
+      {isTopEarningGame(game) && <span className="om-game-tag-pill"><RemixIcon name="sparkling-fill" size={13} />{TOP_EARNING_TAG}</span>}
     </header>
     <aside className="om-game-project-side">
       <div className="om-game-project-body">

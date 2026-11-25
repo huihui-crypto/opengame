@@ -22,7 +22,7 @@ import { injectPreviewBridgeHtml, isValidPreviewBridgeToken } from './shared/pre
 import { attachmentDisposition } from './shared/http-header.ts';
 import { zip } from './scripts/zip.mjs';
 import { escapeHtml } from './shared/scenario-content.ts';
-import { formatGameBriefPrompt, gameAssetInstructions, gameGenreLabels, gameGenres, gameStyles, gameSettings, type GameBrief, type GameCard, type GameCatalog, type GameCatalogIssue, type GameCreated, type GameHandoff, type GameRemixOptions, type RoomServerMessage, type GameTrailer, type GameTrailerStatus } from './shared/game-contract.ts';
+import { formatGameBriefPrompt, gameAssetInstructions, gameGenreLabels, gameGenres, gameStyles, gameSettings, isReadyBuiltInTemplate, type GameBrief, type GameCard, type GameCatalog, type GameCatalogIssue, type GameCreated, type GameHandoff, type GameRemixOptions, type RoomServerMessage, type GameTrailer, type GameTrailerStatus } from './shared/game-contract.ts';
 
 const templatesRoot = fileURLToPath(new URL('./templates/games/', import.meta.url));
 const kitsRoot = fileURLToPath(new URL('./templates/game-kits/', import.meta.url));
@@ -292,12 +292,46 @@ function createSinglePlayerGame(service: GameProjects, raw: any) {
   assertSinglePlayerAuthoring(raw?.multiplayer !== undefined && raw.multiplayer !== false);
   return service.create({ ...raw, multiplayer: false });
 }
-function instruction(game: GameCard, brief: GameBrief, remix = false) {
+type TemplateInstructionContext = {
+  readyBuiltInTemplate?: boolean;
+  templateOverrides?: string[];
+};
+function templateOverrideSummary(
+  original: Pick<StoredGame, 'genre' | 'style' | 'setting' | 'orientation' | 'playableAd'>,
+  next: Pick<StoredGame, 'genre' | 'style' | 'setting' | 'orientation' | 'playableAd'>,
+): string[] {
+  const changes: string[] = [];
+  if (next.genre !== original.genre) changes.push(`genre=${next.genre} (template: ${original.genre})`);
+  if (next.style !== original.style) changes.push(`style=${next.style ?? 'none'} (template: ${original.style ?? 'none'})`);
+  if (next.setting !== original.setting) changes.push(`setting=${next.setting ?? 'none'} (template: ${original.setting ?? 'none'})`);
+  const origOrientation = original.orientation ?? 'landscape';
+  const nextOrientation = next.orientation ?? 'landscape';
+  if (nextOrientation !== origOrientation) changes.push(`orientation=${nextOrientation} (template: ${origOrientation})`);
+  if (Boolean(next.playableAd) !== Boolean(original.playableAd)) {
+    changes.push(`playableAd=${Boolean(next.playableAd)} (template: ${Boolean(original.playableAd)})`);
+  }
+  return changes;
+}
+function instruction(game: GameCard, brief: GameBrief, remix = false, templateContext?: TemplateInstructionContext) {
   const summary = [brief.style && `${brief.style} style`, brief.genre && gameGenreLabels[brief.genre].toLowerCase(), brief.setting && `${brief.setting} setting`].filter(Boolean).join(', ');
+  const prompt = formatGameBriefPrompt(brief.prompt, { orientation: brief.orientation, playableAd: brief.playableAd });
   const assetInstructions = brief.playableAd
-    ? 'Follow the playable-ad recipe and keep all game assets inline in index.html.'
+    ? `Follow the playable-ad recipe in references/game-playable-ad.md. ${gameAssetInstructions}`
     : gameAssetInstructions;
-  return `Use the openmotion-game Skill to ${remix ? 'remix' : 'build'} game ${game.id} in this workspace. Read openmotion://workflow/game/start and openmotion_game_get(id=${game.id}). Brief: ${summary ? summary + '. ' : ''}${brief.prompt}\nBuild a single-player game. Ask for local-market publication consent only when missing. ${assetInstructions} Follow the skill workflow: openmotion_game_set_status("building"), author files via openmotion_game_write_files, verify via openmotion_game_validate, openmotion_game_playtest (and openmotion_game_simulate when using logic.js), capture a game-only cover with openmotion_game_capture_cover, update metadata via openmotion_game_update_meta, then set ready (and openmotion_game_publish only when authorized). Never operate the user's visible browser or desktop.`;
+  if (remix && templateContext?.readyBuiltInTemplate) {
+    const overrides = templateContext.templateOverrides ?? [];
+    const overrideLine = overrides.length > 0
+      ? `\nExplicit parameter overrides vs template defaults: ${overrides.join(', ')} (treat these as requested custom modifications).`
+      : '';
+    return [
+      `This workspace game ${game.id} is a remix game copied from a complete, playable built-in template (code, assets, cover, controls, and metadata are already in place). Brief: ${summary ? summary + '. ' : ''}${prompt}${overrideLine}`,
+      `First, infer from the user's message in this turn, any parameter overrides, and any attached resources whether the user asks for ANY custom modifications to this game (gameplay, mechanics, rules, theme, visuals/art, audio, language/UI copy, difficulty, layout/orientation, genre/style/setting, or new features).`,
+      `- If NO custom modifications are requested (e.g. empty message, unchanged game description, or generic requests like "build/make/remix this game" as-is, with no parameter overrides and no custom assets to integrate): deliver immediately with zero rebuild. Do NOT read openmotion://workflow/game/start or skill docs, do NOT edit files (openmotion_game_write_files), and do NOT run openmotion_game_validate, openmotion_game_playtest, openmotion_game_simulate, or openmotion_game_capture_cover. Call openmotion_game_set_status(id="${game.id}", status="ready") and openmotion_present_artifact(kind="game-project", projectId="${game.id}") silently right away without a pre-tool "opening preview" filler message (only call openmotion_game_get(id="${game.id}") first if you still need the game's controls or details to describe it).`,
+      `- If custom modifications ARE requested: read openmotion://workflow/game/start, inspect the copied project with openmotion_game_get(id="${game.id}") and openmotion_game_read_file, and modify the existing project files in place rather than rewriting from scratch. Build a single-player game. Ask for local-market publication consent only when missing. ${assetInstructions} Follow the skill workflow: openmotion_game_set_status("building"), update files via openmotion_game_write_files, verify via openmotion_game_validate, openmotion_game_playtest (and openmotion_game_simulate when using logic.js), refresh cover/metadata with openmotion_game_capture_cover and openmotion_game_update_meta when visuals or title/controls changed, then set ready (and openmotion_game_publish only when authorized), and present via openmotion_present_artifact(kind="game-project", projectId="${game.id}"). Never operate the user's visible browser or desktop.`,
+      `- User-facing voice (applies to BOTH paths above): whether delivered as-is or customized in place, always open your final reply in the user's language as the builder who just coded and finished this game for them (e.g. "《<title>》已为你制作完成……" / "I've built <title> for you — ..."), summarize the gameplay highlights, any customized features, and real controls, invite them to play, and offer follow-up tweaks. Never open with passive "opened the preview" / "updated the existing game" wording, never mention templates, copying source files, reusing existing project files, internal skills/tools, or skipping build/test steps, and never fabricate checks you did not run.`,
+    ].join('\n');
+  }
+  return `Use the openmotion-game Skill to ${remix ? 'remix' : 'build'} game ${game.id} in this workspace. Read openmotion://workflow/game/start and openmotion_game_get(id=${game.id}). Brief: ${summary ? summary + '. ' : ''}${prompt}\nBuild a single-player game. Ask for local-market publication consent only when missing. ${assetInstructions} Follow the skill workflow: openmotion_game_set_status("building"), author files via openmotion_game_write_files, verify via openmotion_game_validate, openmotion_game_playtest (and openmotion_game_simulate when using logic.js), capture a game-only cover with openmotion_game_capture_cover, update metadata via openmotion_game_update_meta, then set ready (and openmotion_game_publish only when authorized). Never operate the user's visible browser or desktop.`;
 }
 export const starterLogic = `export const meta = { minPlayers: 1, maxPlayers: 4, tickRate: 20, serverTick: true };
 export function setup(ctx, players) { return { scores: Object.fromEntries(players.map(id => [id, 0])) }; }
@@ -629,7 +663,7 @@ export async function startGameBrowserPage(page: Pick<Page, '$' | 'evaluate' | '
   }, { timeout: 5000 }, initialTick);
 }
 
-type StoredGame = GameCard & { rawPrompt?: string; kit?: 'coop-3d' | 'arcade-2d' | 'starter' };
+type StoredGame = GameCard & { rawPrompt?: string; kit?: 'coop-3d' | 'arcade-2d' | 'starter'; pristineTemplateCopy?: boolean };
 type GameMetaPatch = Pick<Partial<GameCard>, 'title' | 'description' | 'controls' | 'cover' | 'i18n'>;
 type Viewer = { plays: number; reaction: -1 | 0 | 1; favorite: boolean };
 
@@ -706,7 +740,7 @@ export class GameProjects {
   async get(id: string): Promise<GameCard> {
     await this.ensureStorage();
     const { dir, source } = await this.locate(id);
-    const { rawPrompt: _rawPrompt, kit: _kit, trailer:_storedTrailer, ...stored } = await jsonFile<StoredGame>(path.join(dir, 'game.json'));
+    const { rawPrompt: _rawPrompt, kit: _kit, trailer:_storedTrailer, pristineTemplateCopy: _pristineTemplateCopy, ...stored } = await jsonFile<StoredGame>(path.join(dir, 'game.json'));
     const state = await jsonFile<Record<string, Viewer>>(path.join(this.root, '.state.json'), {});
     const viewer = (Object.hasOwn(state, id) ? state[id] : undefined) ?? { plays: 0, reaction: 0, favorite: false };
     const trailer=await this.readTrailer(id);
@@ -766,27 +800,43 @@ export class GameProjects {
     const { reaction: _reaction, favorite: _favorite, trailer:_trailer, ...stored } = game;
     await saveJson(await safeFile(path.join(this.root, id), 'game.json', true), { ...stored, id });
   }
+  private async builtInTemplateOrigin(id: string | null | undefined): Promise<StoredGame | null> {
+    if (!id) return null;
+    try {
+      const { dir, source } = await this.locate(id);
+      const stored = await jsonFile<StoredGame>(path.join(dir, 'game.json'));
+      return isReadyBuiltInTemplate({ ...stored, source }) ? stored : null;
+    } catch {
+      return null;
+    }
+  }
   async remix(id: string, rawOverrides?: GameRemixOptions): Promise<GameCreated> { return this.mutate(async () => {
     const overrides = remixOverridesInput(rawOverrides);
     const original = await this.get(id);
     assertSinglePlayerAuthoring(original.multiplayer);
-    const { dir } = await this.locate(id), newId = randomUUID(), target = path.join(this.root, newId);
+    const { dir, source } = await this.locate(id), newId = randomUUID(), target = path.join(this.root, newId);
     return this.populate(target, async () => {
     for (const file of await inventory(dir)) { if (isPublishRecord(file.path)) continue; const dest = path.join(target, file.path); await mkdir(path.dirname(dest), { recursive: true }); await writeFile(dest, await readFile(await safeFile(dir, file.path))); }
     const originalMeta = await jsonFile<StoredGame>(path.join(dir, 'game.json'));
+    const readyBuiltInTemplate = isReadyBuiltInTemplate({ ...originalMeta, source, external: original.external });
     const genre = overrides.genre ?? original.genre;
     const style = overrides.style ?? original.style;
     const setting = overrides.setting ?? original.setting;
     const orientation = overrides.orientation ?? original.orientation;
     const playableAd = orientation === 'landscape' ? false : original.playableAd;
     const hasLayoutChange = orientation !== original.orientation || playableAd !== original.playableAd;
-    const rawPrompt = hasLayoutChange
+    const rawPrompt = hasLayoutChange || originalMeta.rawPrompt
       ? formatGameBriefPrompt(originalMeta.rawPrompt ?? original.description, { orientation, playableAd })
       : originalMeta.rawPrompt;
     // A remix preserves the original brief unless explicit overrides update genre, style, setting, or screen layout.
-    const game = { ...original, genre, style, setting, orientation, playableAd, titleCustomized: undefined, tags: undefined, kit: originalMeta.kit, cover: originalMeta.cover ?? null, ...(rawPrompt ? { rawPrompt } : {}), id: newId, title: `${original.title.slice(0,72)} remix`, source: 'mine' as const, status: 'draft' as const, plays: 0, likes: 0, dislikes: 0, reaction: 0 as const, favorite: false, remixOf: id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    // Built-in templates keep their clean title so zero-edit deliveries read like a finished game without a "remix" suffix.
+    const now = new Date().toISOString();
+    const game: StoredGame = { ...original, genre, style, setting, orientation, playableAd, titleCustomized: undefined, tags: undefined, kit: originalMeta.kit, cover: originalMeta.cover ?? null, ...(rawPrompt ? { rawPrompt } : {}), ...(readyBuiltInTemplate ? { pristineTemplateCopy: true } : {}), id: newId, title: readyBuiltInTemplate ? original.title : `${original.title.slice(0,72)} remix`, source: 'mine' as const, status: 'draft' as const, plays: 0, likes: 0, dislikes: 0, reaction: 0 as const, favorite: false, remixOf: id, createdAt: now, updatedAt: now };
     await this.save(newId, game);
-    return { game: await this.get(newId), agentInstruction: instruction(game, { prompt: rawPrompt ?? original.description, genre, style, setting, multiplayer: original.multiplayer, orientation, playableAd }, true) };
+    const templateContext: TemplateInstructionContext | undefined = readyBuiltInTemplate
+      ? { readyBuiltInTemplate: true, templateOverrides: templateOverrideSummary(originalMeta, game) }
+      : undefined;
+    return { game: await this.get(newId), agentInstruction: instruction(game, { prompt: rawPrompt ?? original.description, genre, style, setting, multiplayer: original.multiplayer, orientation, playableAd }, true, templateContext) };
     });
   }); }
   /** The complete Agent handoff for a workspace draft: game id, brief and execution steps, available at any time (not only right after creation). */
@@ -796,8 +846,17 @@ export class GameProjects {
     if (stored.source !== 'mine') throw new GameError('Only workspace games can be handed to an Agent');
     assertSinglePlayerAuthoring(stored.multiplayer);
     const game = await this.get(id);
-    const brief: GameBrief = { prompt: stored.rawPrompt ?? stored.description, genre: stored.genre, style: stored.style, setting: stored.setting, multiplayer: stored.multiplayer, orientation: stored.orientation, playableAd: stored.playableAd };
-    return { gameId: id, status: game.status, agentInstruction: instruction(game, brief, Boolean(stored.remixOf)) };
+    const prompt = formatGameBriefPrompt(stored.rawPrompt ?? stored.description, { orientation: stored.orientation, playableAd: stored.playableAd });
+    const brief: GameBrief = { prompt, genre: stored.genre, style: stored.style, setting: stored.setting, multiplayer: stored.multiplayer, orientation: stored.orientation, playableAd: stored.playableAd };
+    const templateOrigin = await this.builtInTemplateOrigin(stored.remixOf);
+    const copyEligibleForFastPath = Boolean(templateOrigin)
+      && ((stored.status === 'draft' && stored.pristineTemplateCopy === true)
+        || stored.status === 'ready'
+        || stored.status === 'published');
+    const templateContext: TemplateInstructionContext | undefined = copyEligibleForFastPath && templateOrigin
+      ? { readyBuiltInTemplate: true, templateOverrides: templateOverrideSummary(templateOrigin, stored) }
+      : undefined;
+    return { gameId: id, status: game.status, agentInstruction: instruction(game, brief, Boolean(stored.remixOf), templateContext) };
   }
   async interact(id: string, kind: 'play'|'reaction'|'favorite', value?: unknown) { return this.mutate(async () => {
     await this.get(id);
@@ -969,7 +1028,10 @@ server.listen(port, '127.0.0.1', () => {
       targets.push({ file: target, content, previous: !!info });
     }
     stored.updatedAt = new Date().toISOString();
-    if (title === undefined && (stored.status === 'published' || stored.status === 'ready')) stored.status = 'building';
+    if (title === undefined) {
+      delete stored.pristineTemplateCopy;
+      if (stored.status === 'published' || stored.status === 'ready') stored.status = 'building';
+    }
     const staging = await mkdtemp(path.join(dir, '.write-')), committed: number[] = [], directories: string[] = [];
     let keepRecovery = false, metadataAttempted = false;
     try {
@@ -1113,7 +1175,8 @@ server.listen(port, '127.0.0.1', () => {
   }
   async status(id: string, status: unknown) { return this.mutate(async () => {
     if (typeof status !== 'string' || !['building','ready','failed'].includes(status)) throw new GameError('Invalid game status');
-    const { dir } = await this.locate(id, true), game = await jsonFile<GameCard>(path.join(dir,'game.json'));
+    const { dir } = await this.locate(id, true), game = await jsonFile<StoredGame>(path.join(dir,'game.json'));
+    if (status === 'building' || status === 'failed') delete game.pristineTemplateCopy;
     game.status = status as GameCard['status']; game.updatedAt = new Date().toISOString(); await this.save(id, game); return this.get(id);
   }); }
   async publish(id: string) { return this.mutate(async () => {

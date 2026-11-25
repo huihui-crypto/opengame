@@ -166,9 +166,12 @@ export function DurationControl({
 }
 
 /** `hidden` fields are set by the feature itself, so they are not offered as choices. */
-export function GenerationParameters({ model, draft, defaultValues, hasInputImage = false, hidden = [], appearance = 'standard', popupClassName, onChange }: {
+export function GenerationParameters({ model, draft, defaultValues, hasInputImage = false, hidden = [], appearance = 'standard', popupClassName, isLockedResolution, onLockedResolutionClick, onChange }: {
   model: Model; draft: ParameterDraft; defaultValues?: Record<string, unknown>; hasInputImage?: boolean; hidden?: readonly string[];
-  appearance?: 'standard' | 'boxed'; popupClassName?: string; onChange: (draft: ParameterDraft) => void;
+  appearance?: 'standard' | 'boxed'; popupClassName?: string;
+  isLockedResolution?: (value: string) => boolean;
+  onLockedResolutionClick?: (value: string, label: string) => void;
+  onChange: (draft: ParameterDraft) => void;
 }) {
   const { t } = useI18n();
   const settingsLabelId = useId();
@@ -206,6 +209,11 @@ export function GenerationParameters({ model, draft, defaultValues, hasInputImag
     return t(option?.label ?? String(v));
   };
   const set = (field: GenerationOption, value: unknown) => {
+    if (field.key === 'resolution' && typeof value === 'string' && isLockedResolution?.(value)) {
+      const option = field.choices?.find(c => c.value === value);
+      onLockedResolutionClick?.(value, option?.label ?? value);
+      return;
+    }
     const values = { ...draft.values };
     if (value === undefined) delete values[field.key]; else values[field.key] = value;
     Object.assign(values, field.choices?.find(c => c.value === value)?.requires);
@@ -260,18 +268,23 @@ export function GenerationParameters({ model, draft, defaultValues, hasInputImag
 
   const renderChoicePills = (field: GenerationOption) => (
     <div className="om-option-pills" role="group" aria-label={t(field.label)}>
-      {choicesFor(field).map(option => (
-        <Button
-          variant="plain"
-          key={String(option.value)}
-          className="om-option-pill"
-          disabled={constraints[field.key] !== undefined && constraints[field.key] !== option.value}
-          aria-pressed={value(field) === option.value}
-          onClick={() => set(field, option.value)}
-        >
-          {t(option.label)}
-        </Button>
-      ))}
+      {choicesFor(field).map(option => {
+        const locked = field.key === 'resolution' && typeof option.value === 'string' && Boolean(isLockedResolution?.(option.value));
+        return (
+          <Button
+            variant="plain"
+            key={String(option.value)}
+            className="om-option-pill"
+            disabled={constraints[field.key] !== undefined && constraints[field.key] !== option.value}
+            aria-pressed={!locked && value(field) === option.value}
+            data-locked={locked || undefined}
+            onClick={() => set(field, option.value)}
+          >
+            {t(option.label)}
+            {locked && <RemixIcon name="lock-line" size={12} />}
+          </Button>
+        );
+      })}
     </div>
   );
 
@@ -285,10 +298,15 @@ export function GenerationParameters({ model, draft, defaultValues, hasInputImag
     const hasDefault = (model.defaults?.[field.key] ?? effectiveDefault(field)) !== undefined;
     const autoOption = !hasDefault || current === '__auto' ? [{ value: '__auto', label: t('Model default') }] : [];
     return <Select appearance={appearance} label={t(field.label)} value={current} popupClassName={popupClassName} onCommit={next => set(field, choices.find(choice => String(choice.value) === next)?.value)}
-      options={[...autoOption, ...choices.map(choice => ({
-        value: String(choice.value), label: t(field.key === 'resolution' && /^\d+k$/i.test(choice.label) ? choice.label.toUpperCase() : choice.label),
-        disabled: constraints[field.key] !== undefined && constraints[field.key] !== choice.value,
-      }))]} />;
+      options={[...autoOption, ...choices.map(choice => {
+        const baseLabel = t(field.key === 'resolution' && /^\d+k$/i.test(choice.label) ? choice.label.toUpperCase() : choice.label);
+        const locked = field.key === 'resolution' && typeof choice.value === 'string' && Boolean(isLockedResolution?.(choice.value));
+        return {
+          value: String(choice.value),
+          label: locked ? `${baseLabel} · Pro` : baseLabel,
+          disabled: constraints[field.key] !== undefined && constraints[field.key] !== choice.value,
+        };
+      })]} />;
   };
   const quickPicker = (field: GenerationOption, title: string, popupClass: string, content: ReactNode) => {
     const name = t(title);

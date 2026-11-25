@@ -105,7 +105,7 @@ async function estimateCapabilityQuote(ctx: CapabilityQuoteContext): Promise<Cap
   if (customQuoteEstimator) return customQuoteEstimator(ctx);
   const modality = ctx.capability?.modality ?? ctx.modality ?? ctx.model?.modality;
   const costTier: CapabilityCostTier = ctx.capability?.costTier ?? (modality === 'video' ? 'medium' : 'low');
-  const requiresExplicitApproval = ctx.capability?.requiresExplicitApproval ?? modality === 'video';
+  const requiresExplicitApproval = ctx.capability?.requiresExplicitApproval ?? (ctx.capability?.executor.kind !== 'service');
   return {
     capabilityId: ctx.capability?.id ?? 'raw-model',
     costTier,
@@ -255,9 +255,12 @@ export async function capabilityDiscover(
   tracking?: OmTracking,
   channel: 'gui' | 'mcp' = 'mcp',
 ) {
+  const inspectModality = args.modality === 'image' || args.modality === 'video' || args.modality === 'audio'
+    ? args.modality
+    : undefined;
   if (args.action === 'providers') {
     if (args.provider) return mediaUse(store, { action: 'reference', provider: args.provider }, tracking);
-    return mediaUse(store, { action: 'inspect' }, tracking);
+    return mediaUse(store, { action: 'inspect', ...(inspectModality ? { modality: inspectModality } : {}) }, tracking);
   }
   if (args.action === 'models') {
     if (args.modality === '3d') return { providers: [], catalogs: [], setupRequired: true };
@@ -365,10 +368,16 @@ export async function capabilityDiscover(
     }).map(summarize);
     const offset = args.offset ?? 0;
     const sliced = args.limit === undefined ? entries.slice(offset) : entries.slice(offset, offset + args.limit);
-    const inspected = (await mediaUse(store, { action: 'inspect' }, tracking)) as {
+    const inspected = (await mediaUse(
+      store,
+      { action: 'inspect', ...(inspectModality ? { modality: inspectModality } : {}) },
+      tracking,
+    )) as {
       providers: unknown;
       defaults: unknown;
       settingsHandoff: unknown;
+      upgrade?: unknown;
+      _upgradeLinkResult?: unknown;
     };
     return {
       capabilities: sliced,
@@ -379,6 +388,10 @@ export async function capabilityDiscover(
       providers: inspected.providers,
       defaults: inspected.defaults,
       settingsHandoff: inspected.settingsHandoff,
+      // MCP callers get the same attributed Free/Go upgrade link as inspect; the MCP boundary strips and tracks
+      // _upgradeLinkResult. The Studio (gui) list never exposes either field.
+      ...(channel === 'mcp' && inspected.upgrade ? { upgrade: inspected.upgrade } : {}),
+      ...(channel === 'mcp' && inspected._upgradeLinkResult ? { _upgradeLinkResult: inspected._upgradeLinkResult } : {}),
     };
   }
 

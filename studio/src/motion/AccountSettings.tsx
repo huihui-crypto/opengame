@@ -68,7 +68,7 @@ export function SignInGuide({ action }: { action: ReactNode }) {
   useEffect(() => { tracking.reportEntitlementGateView('settings', 'settings_signin'); }, []);
   return <section className="om-card om-plan-guide" data-guide="sign-in">
     <div className="om-plan-guide-head"><h2 className="om-title">{t('Sign in to start multimodal generation')}</h2><span className="om-badge">{t('Plus and above')}</span></div>
-    <p className="om-muted" data-quiet>{t('Sign in, then upgrade to Plus to generate images, video, voiceovers and music right in OpenMotion. No API keys to set up.')}</p>
+    <p className="om-muted" data-quiet>{t('Sign in, then upgrade to Plus to generate 3D assets, game art, SFX, voiceovers, and video right in OpenGame. No API keys to set up.')}</p>
     <GuideCapabilities />
     <div className="om-settings-actions">{action}<GuideOffer callout /></div>
   </section>;
@@ -80,7 +80,7 @@ export function UpgradeGuide({ plan, subscription }: { plan: 'free' | 'go'; subs
   useEffect(() => { tracking.reportEntitlementGateView('settings', 'settings_subscription'); }, []);
   return <section className="om-card om-plan-guide" data-guide="upgrade">
     <div className="om-plan-guide-head"><h2 className="om-title om-plan-name">{plan === 'free' ? t('Free plan') : 'Go'}</h2><span className="om-badge">{t('Current plan')}</span></div>
-    <p className="om-muted">{t('Upgrade to Plus to generate images, video, voiceovers and music. Pro and Max include them too.')}</p>
+    <p className="om-muted">{t('Upgrade to Plus to generate 3D assets, game art, SFX, music, and video. Pro and Max include them too.')}</p>
     <GuideCapabilities />
     <GuideOffer />
     <div className="om-settings-actions">{subscription.button('view_plans', true)}{subscription.button('manage_subscription')}{subscription.link}</div>

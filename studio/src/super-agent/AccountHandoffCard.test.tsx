@@ -6,13 +6,19 @@ import type { AccountSummary } from '../../../shared/provider-directory';
 import type { SuperAgentActionCard } from '../../../shared/super-agent';
 import { I18nProvider } from '../i18n/I18n';
 import { gatewayRequest } from '../motion/gatewayClient';
+import { reportEntitlementGateClick, reportEntitlementGateView, reportEntitlementRefresh } from '../motion/pageTracking';
 import { notifyProvidersChanged } from '../motion/useProviderDirectory';
 import { AccountHandoffCard } from './AccountHandoffCard';
 import { resetAccountHandoffSessions } from './useAccountHandoff';
 
 vi.mock('../motion/gatewayClient', () => ({ gatewayRequest: vi.fn() }));
 vi.mock('../motion/useProviderDirectory', () => ({ notifyProvidersChanged: vi.fn() }));
-vi.mock('../motion/pageTracking', () => ({ newTrackingId: () => crypto.randomUUID() }));
+vi.mock('../motion/pageTracking', () => ({ newTrackingId: () => crypto.randomUUID(), reportEntitlementGateView: vi.fn(), reportEntitlementGateClick: vi.fn(), reportEntitlementRefresh: vi.fn() }));
+let blackFriday = false;
+vi.mock('../motion/campaignAttribution', async importOriginal => ({
+  ...(await importOriginal<typeof import('../motion/campaignAttribution')>()),
+  useBlackFridayActive: () => blackFriday,
+}));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const card: SuperAgentActionCard = { id: 'signin', kind: 'sign_in', entry: 'agent_media_signed_out', provider: 'account' };
@@ -20,26 +26,33 @@ let root: Root;
 let container: HTMLDivElement;
 let account: AccountSummary;
 let loginResult: AccountSummary;
-let checkout: { url: string; opened: boolean };
 const onResume = vi.fn();
 const onOpenSettings = vi.fn();
 const request = vi.mocked(gatewayRequest);
 const button = (label: string) => Array.from(container.querySelectorAll('button')).find(item => item.textContent === label)!;
 const status = () => container.querySelector('.om-sa-action-card')?.getAttribute('data-state');
 const click = async (label: string) => { expect(button(label), label).toBeTruthy(); await act(async () => button(label).click()); };
+const plansLink = (label: string) => Array.from(container.querySelectorAll('a')).find(item => item.textContent === label)!;
+const entryIdOf = (href: string | null) => new URL(href ?? '').searchParams.get('od_entry_id');
+const openPlansLink = async (label: string) => {
+  expect(plansLink(label), label).toBeTruthy();
+  await act(async () => plansLink(label).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
+};
 const tick = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 
 beforeEach(() => {
   resetAccountHandoffSessions();
   vi.useFakeTimers();
   vi.clearAllMocks();
+  blackFriday = false;
+  vi.spyOn(window, 'open').mockReturnValue(null);
+  // Anchors navigate on click in happy-dom; the card only needs the click to start its upgrade wait.
+  document.addEventListener('click', preventNavigation, true);
   account = { state: 'signed-out', consoleUrl: '' };
   loginResult = { state: 'authorizing', consoleUrl: '', authorizationUrl: 'https://example.test/login', userCode: 'ABCD', browserOpened: true };
-  checkout = { url: 'https://example.test/dashboard?billing=plan&od_entry_source=test', opened: true };
   onResume.mockReset();
   request.mockReset().mockImplementation(async path => {
     if (path === 'settings/account/login') { account = loginResult; return account; }
-    if (path === 'settings/account/subscription') return checkout;
     if (path === 'settings/account/cancel') { account = { state: 'signed-out', consoleUrl: '' }; return account; }
     return account;
   });
@@ -47,7 +60,9 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
 });
+function preventNavigation(event: Event) { if ((event.target as Element | null)?.closest?.('a')) event.preventDefault(); }
 afterEach(async () => {
+  document.removeEventListener('click', preventNavigation, true);
   await act(async () => root.unmount());
   container.remove();
   vi.useRealTimers();
@@ -64,7 +79,7 @@ describe('AccountHandoffCard', () => {
   it('starts attributed sign-in, shows browser details, and resumes Plus exactly once', async () => {
     await render();
     await click('Sign in & continue');
-    expect(request).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'super_agent_signin', entryId: expect.stringMatching(/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i) });
+    expect(request).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'studio_generate', entryId: expect.stringMatching(/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i) });
     expect(container.textContent).toContain('Verification code: ABCD');
     expect(container.querySelector('a')?.textContent).toBe('Continue in browser');
     expect(container.querySelector('a')?.getAttribute('href')).toBe(loginResult.authorizationUrl);
@@ -79,44 +94,61 @@ describe('AccountHandoffCard', () => {
     await render({ ...card });
     expect(onResume).toHaveBeenCalledTimes(1);
   });
-  it.each(['free', 'go'])('opens attributed plans after %s sign-in and resumes on refresh', async plan => {
+  it.each(['free', 'go'])('offers the attributed pricing link after %s sign-in and resumes on refresh', async plan => {
     await render();
     await click('Sign in & continue');
     account = { ...account, state: 'signed-in', plan };
     await tick(2_000);
     const login = request.mock.calls.find(call => call[0] === 'settings/account/login')!;
-    expect(request).toHaveBeenCalledWith('settings/account/subscription', 'POST', { hookId: 'super_agent_upgrade', entryId: (login[2] as { entryId: string }).entryId });
+    const loginEntry = (login[2] as { entryId: string }).entryId;
+    expect(status()).toBe('opening_plan');
+    const href = plansLink('Upgrade to Plus').getAttribute('href');
+    expect(href).toContain('open-design.ai/');
+    expect(href).toContain('utm_medium=agent_upgrade');
+    expect(entryIdOf(href)).toContain(loginEntry);
+    expect(request.mock.calls.some(call => call[0] === 'settings/account/subscription')).toBe(false);
+    await openPlansLink('Upgrade to Plus');
+    expect(reportEntitlementGateClick).toHaveBeenLastCalledWith('creative_studio', 'open_pricing', 'studio_generate', { studio_id: 'game', entry_id: loginEntry });
     expect(status()).toBe('awaiting_upgrade');
     expect(onResume).not.toHaveBeenCalled();
     account = { ...account, plan: 'plus' };
     await click("I've upgraded");
     expect(request).toHaveBeenCalledWith('settings/account?refresh=true');
+    expect(reportEntitlementRefresh).toHaveBeenCalledWith('creative_studio', 'studio_generate', loginEntry, 'success', true);
     expect(onResume).toHaveBeenCalledExactlyOnceWith(card, { plan: 'plus', key: card.id });
   });
-  it.each(['upgrade_free', 'upgrade_go'] as const)('opens plans directly for a signed-in %s account without signing in', async kind => {
+  it.each(['upgrade_free', 'upgrade_go'] as const)('opens the pricing link directly for a signed-in %s account without signing in', async kind => {
     const target = { ...card, kind };
     account = { state: 'signed-in', plan: kind === 'upgrade_go' ? 'go' : 'free', consoleUrl: '' };
     await render(target);
+    expect(reportEntitlementGateView).toHaveBeenCalledWith('creative_studio', 'studio_free_gate', { studio_id: 'game', entry_id: expect.any(String) });
     await click('Use my own API key');
     expect(onOpenSettings).toHaveBeenCalledWith(target, 'api_key');
-    await click('Upgrade to Plus');
+    await openPlansLink('Upgrade to Plus');
     expect(status()).toBe('awaiting_upgrade');
     expect(request).not.toHaveBeenCalledWith('settings/account/login', expect.anything(), expect.anything());
-    expect(request).toHaveBeenCalledWith('settings/account/subscription', 'POST', { hookId: 'super_agent_upgrade', entryId: expect.any(String) });
+    expect(request.mock.calls.some(call => call[0] === 'settings/account/subscription')).toBe(false);
     account = { ...account, state: 'signed-in', plan: 'plus' };
     await tick(5_000);
     expect(onResume).toHaveBeenCalledTimes(1);
   });
-  it('signs a signed-out upgrade card in locally before opening plans', async () => {
+  it('labels the pricing link with the Black Friday offer and attributes the campaign', async () => {
+    blackFriday = true;
+    account = { state: 'signed-in', plan: 'free', consoleUrl: '' };
+    await render({ ...card, kind: 'upgrade_free' });
+    await openPlansLink('Upgrade · 50% OFF');
+    expect(reportEntitlementGateClick).toHaveBeenLastCalledWith('creative_studio', 'open_pricing', 'studio_free_gate', { studio_id: 'game', entry_id: expect.any(String), campaign_id: 'black_friday_2026' });
+    expect(status()).toBe('awaiting_upgrade');
+  });
+  it('signs a signed-out upgrade card in locally before offering plans', async () => {
     await render({ ...card, kind: 'upgrade_free' });
     await click('Upgrade to Plus');
-    expect(request).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'super_agent_signin', entryId: expect.any(String) });
-    expect(request).not.toHaveBeenCalledWith('settings/account/subscription', expect.anything(), expect.anything());
+    expect(request).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'studio_free_gate', entryId: expect.any(String) });
     expect(status()).toBe('authorizing');
     account = { state: 'signed-in', plan: 'free', consoleUrl: '' };
     await tick(2_000);
-    expect(status()).toBe('awaiting_upgrade');
-    expect(request).toHaveBeenCalledWith('settings/account/subscription', 'POST', { hookId: 'super_agent_upgrade', entryId: expect.any(String) });
+    expect(status()).toBe('opening_plan');
+    expect(plansLink('Upgrade to Plus')).toBeTruthy();
     expect(onResume).not.toHaveBeenCalled();
   });
   it('rereads billing when sign-in completes before the plan is known', async () => {
@@ -128,7 +160,7 @@ describe('AccountHandoffCard', () => {
     account = { state: 'signed-in', consoleUrl: '' };
     await tick(2_000);
     expect(request).toHaveBeenCalledWith('settings/account?refresh=true');
-    expect(status()).toBe('awaiting_upgrade');
+    expect(status()).toBe('opening_plan');
     expect(onResume).not.toHaveBeenCalled();
   });
   it('keeps waiting for sign-in after the card unmounts and remounts (preview expanded)', async () => {
@@ -156,24 +188,19 @@ describe('AccountHandoffCard', () => {
     expect(onResume).toHaveBeenLastCalledWith(card, { plan: 'plus', key: 'chat-b:turn-1:signin' });
     expect(status()).toBe('done');
   });
-  it('finishes a pending plan request after the card remounts', async () => {
-    checkout.opened = false;
-    vi.spyOn(window, 'open').mockReturnValue(null);
-    const original = request.getMockImplementation()!;
-    let openPlans!: (value: typeof checkout) => void;
-    request.mockImplementation((...args) => args[0] === 'settings/account/subscription'
-      ? new Promise<typeof checkout>(resolve => { openPlans = resolve; }) : original(...args));
+  it('keeps the plans CTA and its entry id after the card remounts', async () => {
     account = { state: 'signed-in', plan: 'free', consoleUrl: '' };
-    await render({ ...card, kind: 'upgrade_free' });
-    await click('Upgrade to Plus');
+    await render();
+    await click('Sign in & continue');
     expect(status()).toBe('opening_plan');
+    const before = plansLink('Upgrade to Plus').getAttribute('href');
     await act(async () => root.unmount());
     root = createRoot(container);
-    await render({ ...card, kind: 'upgrade_free' });
-    await act(async () => openPlans(checkout));
+    await render();
+    expect(status()).toBe('opening_plan');
+    expect(entryIdOf(plansLink('Upgrade to Plus').getAttribute('href'))).toBe(entryIdOf(before));
+    await openPlansLink('Upgrade to Plus');
     expect(status()).toBe('awaiting_upgrade');
-    expect(container.querySelector('a')?.getAttribute('href')).toBe(checkout.url);
-    expect(request.mock.calls.filter(call => call[0] === 'settings/account/subscription')).toHaveLength(1);
   });
   it('continues an unfinished start step after the card remounts', async () => {
     const original = request.getMockImplementation()!;
@@ -188,10 +215,47 @@ describe('AccountHandoffCard', () => {
     await act(async () => root.unmount());
     root = createRoot(container);
     await render();
-    expect(request).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'super_agent_signin', entryId: expect.any(String) });
+    expect(request).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'studio_generate', entryId: expect.any(String) });
     expect(status()).toBe('authorizing');
     await act(async () => firstRead({ state: 'signed-out', consoleUrl: '' }));
     expect(status()).toBe('authorizing');
+  });
+  it('keeps a continuation that is still in flight when the card remounts, and surfaces its failure', async () => {
+    let failResume!: (error: Error) => void;
+    onResume.mockImplementationOnce(() => new Promise((_, reject) => { failResume = reject; })).mockResolvedValueOnce(undefined);
+    await render();
+    await click('Sign in & continue');
+    account = { ...account, state: 'signed-in', plan: 'plus' };
+    await tick(2_000);
+    expect(onResume).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render();
+    await click('Continue');
+    expect(status()).toBe('resuming');
+    expect(onResume).toHaveBeenCalledTimes(1);
+    await act(async () => failResume(new Error('Temporary send failure')));
+    expect(status()).toBe('failed');
+    expect(container.textContent).toContain("Signed in, but couldn't continue your request.");
+    await click('Retry');
+    expect(onResume).toHaveBeenCalledTimes(2);
+    expect(status()).toBe('done');
+  });
+  it('reports the upgrade under the entry id of the pricing link actually opened, across remounts', async () => {
+    account = { state: 'signed-in', plan: 'free', consoleUrl: '' };
+    await render({ ...card, kind: 'upgrade_free' });
+    const opened = entryIdOf(plansLink('Upgrade to Plus').getAttribute('href'))!;
+    await openPlansLink('Upgrade to Plus');
+    await tick(20 * 60_000);
+    expect(entryIdOf(plansLink('Reopen plans').getAttribute('href'))).not.toBe(opened);
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render({ ...card, kind: 'upgrade_free' });
+    account = { ...account, plan: 'plus' };
+    await click('Check again');
+    const [, , reported] = vi.mocked(reportEntitlementRefresh).mock.lastCall!;
+    expect(opened).toContain(reported!);
+    expect(onResume).toHaveBeenCalledTimes(1);
   });
   it('times out sign-in, cancels the connector, and permits retry', async () => {
     await render();
@@ -207,12 +271,12 @@ describe('AccountHandoffCard', () => {
   it('checks for payment after checkout times out without cancelling or reopening plans', async () => {
     account = { state: 'signed-in', plan: 'free', consoleUrl: '' };
     await render({ ...card, kind: 'upgrade_free' });
-    await click('Upgrade to Plus');
+    await openPlansLink('Upgrade to Plus');
     await tick(20 * 60_000);
     expect(status()).toBe('failed');
     expect(container.textContent).toContain("We haven't detected your upgrade yet.");
     expect(container.textContent).toContain("If you've already paid, click Check again; otherwise reopen the plans.");
-    expect(button('Reopen plans')).toBeTruthy();
+    expect(plansLink('Reopen plans')).toBeTruthy();
     expect(button('Check again')).toBeTruthy();
     expect(container.textContent).not.toContain('Sign-in timed out.');
     expect(request).not.toHaveBeenCalledWith('settings/account/cancel', 'POST');
@@ -225,20 +289,22 @@ describe('AccountHandoffCard', () => {
     await click('Check again');
     expect(onResume).toHaveBeenCalledTimes(1);
     expect(status()).toBe('done');
-    expect(request.mock.calls.filter(call => call[0] === 'settings/account/subscription')).toHaveLength(1);
   });
-  it.each(['sign_in', 'upgrade_free'] as const)('reopens attributed plans after an upgrade timeout on a %s card', async kind => {
+  it.each(['sign_in', 'upgrade_free'] as const)('reopens attributed plans with a new entry id after an upgrade timeout on a %s card', async kind => {
     account = { ...account, state: 'signed-in', plan: 'free' };
     await render({ ...card, kind });
-    await click(kind === 'sign_in' ? 'Sign in & continue' : 'Upgrade to Plus');
-    const first = request.mock.calls.find(call => call[0] === 'settings/account/subscription')!;
+    if (kind === 'sign_in') await click('Sign in & continue');
+    const first = entryIdOf(plansLink('Upgrade to Plus').getAttribute('href'));
+    await openPlansLink('Upgrade to Plus');
     await tick(20 * 60_000);
-    await click('Reopen plans');
+    const second = entryIdOf(plansLink('Reopen plans').getAttribute('href'));
+    expect(second).not.toBe(first);
+    await openPlansLink('Reopen plans');
     expect(status()).toBe('awaiting_upgrade');
-    const requests = request.mock.calls.filter(call => call[0] === 'settings/account/subscription');
-    expect(requests).toHaveLength(2);
-    expect(requests[1][2]).toMatchObject({ hookId: 'super_agent_upgrade' });
-    expect(requests[1][2]).not.toEqual(first[2]);
+    const tracked = vi.mocked(reportEntitlementGateClick).mock.lastCall!;
+    expect(tracked.slice(0, 3)).toEqual(['creative_studio', 'open_pricing', kind === 'sign_in' ? 'studio_generate' : 'studio_free_gate']);
+    // The click is tracked with the same entry_id the reopened pricing link carries.
+    expect(second).toContain(tracked[3]!.entry_id);
   });
   it.each(['sign_in', 'upgrade_free', 'upgrade_go'] as const)('retries a rejected continuation from a %s card', async kind => {
     onResume.mockRejectedValueOnce(new Error('Could not continue the conversation. Try again.')).mockResolvedValueOnce(undefined);
@@ -246,7 +312,7 @@ describe('AccountHandoffCard', () => {
     await render(target);
     await click(kind === 'sign_in' ? 'Sign in & continue' : 'Upgrade to Plus');
     account = { ...account, state: 'signed-in', plan: 'plus' };
-    await tick(kind === 'sign_in' ? 2_000 : 5_000);
+    await tick(2_000);
     expect(onResume).toHaveBeenCalledTimes(1);
     expect(status()).toBe('failed');
     expect(container.textContent).toContain('Could not continue the conversation. Try again.');
@@ -269,59 +335,6 @@ describe('AccountHandoffCard', () => {
     );
     expect(container.querySelector('a')?.getAttribute('href')).toBe(loginResult.authorizationUrl);
     expect(button('Cancel')).toBeTruthy();
-  });
-  it('marks a stalled plan-opening request as an upgrade timeout', async () => {
-    const original = request.getMockImplementation()!;
-    request.mockImplementation((...args) => args[0] === 'settings/account/subscription'
-      ? new Promise(() => {}) : original(...args));
-    account = { state: 'signed-in', plan: 'free', consoleUrl: '' };
-    await render({ ...card, kind: 'upgrade_free' });
-    await click('Upgrade to Plus');
-    expect(status()).toBe('opening_plan');
-    await tick(20 * 60_000);
-    expect(container.textContent).toContain("We haven't detected your upgrade yet.");
-    account = { state: 'signed-in', plan: 'plus', consoleUrl: '' };
-    await click('Check again');
-    expect(onResume).toHaveBeenCalledTimes(1);
-    expect(status()).toBe('done');
-  });
-  it('allows twenty minutes after checkout opens even when opening was slow', async () => {
-    const original = request.getMockImplementation()!;
-    let openPlans!: (value: typeof checkout) => void;
-    request.mockImplementation((...args) => args[0] === 'settings/account/subscription'
-      ? new Promise<typeof checkout>(resolve => { openPlans = resolve; }) : original(...args));
-    account = { state: 'signed-in', plan: 'free', consoleUrl: '' };
-    await render({ ...card, kind: 'upgrade_free' });
-    await click('Upgrade to Plus');
-    await tick(10 * 60_000);
-    await act(async () => openPlans(checkout));
-    await tick(19 * 60_000);
-    expect(status()).toBe('awaiting_upgrade');
-    await tick(60_000);
-    expect(status()).toBe('failed');
-    expect(onResume).not.toHaveBeenCalled();
-  });
-  it('uses the system-browser fallback and preserves a link when popups are blocked', async () => {
-    checkout.opened = false;
-    vi.spyOn(window, 'open').mockReturnValue(null);
-    account = { state: 'signed-in', plan: 'go', consoleUrl: '' };
-    await render({ ...card, kind: 'upgrade_go' });
-    await click('Upgrade to Plus');
-    expect(window.open).toHaveBeenCalledWith(checkout.url, '_blank');
-    expect(container.querySelector('a')?.getAttribute('href')).toBe(checkout.url);
-    account = { ...account, state: 'signed-in', plan: 'plus' };
-    await act(async () => window.dispatchEvent(new Event('focus')));
-    expect(onResume).toHaveBeenCalledTimes(1);
-  });
-  it('clears the fallback popup opener', async () => {
-    checkout.opened = false;
-    const page = { opener: window };
-    vi.spyOn(window, 'open').mockReturnValue(page as Window);
-    account = { state: 'signed-in', plan: 'free', consoleUrl: '' };
-    await render({ ...card, kind: 'upgrade_free' });
-    await click('Upgrade to Plus');
-    expect(page.opener).toBeNull();
-    expect(container.querySelector('a')).toBeNull();
   });
   it.each(['sign_in', 'upgrade_free', 'upgrade_go'] as const)('shows the included-plan idle CTA until clicked for restored %s cards', async kind => {
     account = { ...account, state: 'signed-in', plan: 'plus' };
@@ -347,9 +360,9 @@ describe('AccountHandoffCard', () => {
     account = { ...account, state: 'signed-in', ...value };
     await render();
     await click('Sign in & continue');
-    expect(status()).toBe('awaiting_upgrade');
+    expect(status()).toBe('opening_plan');
     expect(request.mock.calls.some(call => call[0] === 'settings/account/login')).toBe(false);
-    expect(request.mock.calls.filter(call => call[0] === 'settings/account/subscription')).toHaveLength(1);
+    expect(request.mock.calls.some(call => call[0] === 'settings/account/subscription')).toBe(false);
   });
   it.each([{ plan: 'enterprise' }, { plan: 'free', billingUnavailable: true }])('resumes unknown billing for Agent enforcement: %j', async value => {
     await render();
@@ -362,7 +375,7 @@ describe('AccountHandoffCard', () => {
   it('refreshes checkout immediately when the document becomes visible', async () => {
     account = { state: 'signed-in', plan: 'free', consoleUrl: '' };
     await render({ ...card, kind: 'upgrade_free' });
-    await click('Upgrade to Plus');
+    await openPlansLink('Upgrade to Plus');
     account = { ...account, state: 'signed-in', plan: 'plus' };
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
     await act(async () => document.dispatchEvent(new Event('visibilitychange')));
@@ -388,24 +401,17 @@ describe('AccountHandoffCard', () => {
     expect(status()).toBe('authorizing');
     expect(request.mock.calls.filter(call => call[0] === 'settings/account/login')).toHaveLength(2);
   });
-  it('shows connector recovery and plan-open failures', async () => {
+  it('shows connector recovery and then offers plans after a retry', async () => {
     loginResult = { state: 'signed-out', consoleUrl: '', errorCode: 'connector_unavailable' };
     await render();
     await click('Sign in & continue');
+    expect(container.textContent).toContain("The OpenDesign sign-in component isn't available on this device.");
     await click('Open account settings');
     expect(onOpenSettings).toHaveBeenCalledWith(card, 'account');
     account = { ...account, state: 'signed-in', plan: 'free' };
-    const original = request.getMockImplementation()!;
-    request.mockImplementation((...args) => args[0] === 'settings/account/subscription' ? Promise.reject(new Error('offline')) : original(...args));
     await click('Retry');
-    expect(container.textContent).toContain("Couldn't open your browser.");
-    request.mockImplementation(original);
-    const calls = request.mock.calls.length;
-    await click('Retry');
-    expect(request.mock.calls.slice(calls)).toEqual([
-      ['settings/account/subscription', 'POST', { hookId: 'super_agent_upgrade', entryId: expect.any(String) }],
-    ]);
-    expect(status()).toBe('awaiting_upgrade');
+    expect(status()).toBe('opening_plan');
+    expect(reportEntitlementGateClick).toHaveBeenLastCalledWith('creative_studio', 'start_sign_in', 'studio_generate', { studio_id: 'game', entry_id: expect.any(String) });
   });
   it('does not resume twice in Strict Mode', async () => {
     await render(card, true);

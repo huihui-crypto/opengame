@@ -105,11 +105,9 @@ describe('ExecutionTimeline inline action cards', () => {
     await act(async () => {
       signInBtn!.click();
     });
-    expect(gatewayRequest).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'super_agent_signin', entryId: expect.any(String) });
+    expect(gatewayRequest).toHaveBeenCalledWith('settings/account/login', 'POST', { hookId: 'studio_generate', entryId: expect.any(String) });
+    // Account cards are handled in the card itself; top-up keeps the #24 balance gate (not the trigger callback).
     expect(onTriggerActionCard).not.toHaveBeenCalled();
-    const topUpBtn = Array.from(container.querySelectorAll('button')).find(btn => btn.textContent?.trim() === 'Manage billing');
-    await act(async () => topUpBtn!.click());
-    expect(onTriggerActionCard).toHaveBeenCalledWith(cards[3]);
   });
 
   it('suppresses redundant generic sign_in cards when web_publish_sign_in is present in the same turn', async () => {

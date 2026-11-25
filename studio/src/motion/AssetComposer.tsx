@@ -31,7 +31,9 @@ import { attachableReferenceLimit, creationModels } from './creationModels';
 import { isOpenDesignProvider, modelFamilyLabel, providerDisplayName } from './imageMenuModels';
 import { registeredProvider } from '../../../shared/provider-registry';
 import { ProviderSetupNotice } from './ProviderSetupNotice';
-import { setPendingAttribution } from './entitlementAttribution';
+import { BLACK_FRIDAY_CAMPAIGN, campaignPricingUrl, newCampaignEntryId, useBlackFridayActive } from './campaignAttribution';
+import { setPendingAttribution, useCheckoutReturnRefresh } from './entitlementAttribution';
+import { detectMonetizationGateFromError, openMonetizationGate, openResolutionGate } from './monetization/monetizationGateBus';
 import { send } from './reporting';
 
 export interface AssetDraft { modality: Modality; prompt: string; capabilityOptions?: Record<string, string>; relight?: RelightChoices; videoChoices?: Record<string, string>; shotPreferences?: { aspect: string; duration?: number }; preferredModel?: string; model?: string; parameters?: Record<string, unknown>; target?: { asset: LibraryAsset; versionId: string }; references: { reference: AssetReference; name: string }[] }
@@ -45,7 +47,11 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
   onUploadFiles?: (files: File[], source?: 'drop' | 'paste') => void; uploadingReferences?: boolean;
   onCreated: (job: GenerationJob) => void; onResume?: (job: GenerationJob) => Promise<void>; onError: (message: string) => void; onInfo?: (message: string) => void; onClose: () => void;
 }) {
-  const { t } = useI18n(), { openModelSettings, openProviderSettings, openAccountSettings, openSubscriptionSettings } = useWorkspaceChrome();
+  const { locale, t } = useI18n(), { openModelSettings, openProviderSettings, openAccountSettings, openSubscriptionSettings } = useWorkspaceChrome();
+  const campaign = useBlackFridayActive();
+  const [freeGateEntryId, setFreeGateEntryId] = useState(newCampaignEntryId);
+  const trackingPageForHook = studio ? 'creative_studio' as const : 'assets' as const;
+  const markFreeGateCheckoutReturn = useCheckoutReturnRefresh(trackingPageForHook, 'studio_free_gate');
   const scene = studio?.destination.scene;
   const imageWorkspace = studio?.destination.studio.id === 'design' && scene?.modality === 'image';
   const videoLanding = Boolean(studio?.destination.landing && scene?.modality === 'video');
@@ -90,6 +96,10 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
   const unconfiguredPreferred = Boolean(studio && gateway && preferred && !selected && preferredProvider && !preferredProvider.available);
   const providerLabel = preferredProvider?.label ?? (preferred && registeredProvider(preferred.provider)?.label) ?? preferred?.provider ?? '';
   const accountNotIncluded = selected?.provider === 'account' && preferredProvider?.mediaEntitlement === 'not-included';
+  const accountPlan = selected?.provider === 'account' ? preferredProvider?.plan?.trim().toLowerCase() : undefined;
+  const highResLockedForPlan = Boolean(accountNotIncluded)
+    || Boolean(accountPlan && !['pro', 'max', 'ultra', 'team', 'enterprise'].includes(accountPlan));
+  const isLockedHighRes = (value: string) => highResLockedForPlan && /^(2k|4k|2160p|1440p)$/i.test(value.trim());
   const capabilityMaxReferences = activeCapability?.input.maxReferences;
   const maximumReferences = selected
     ? Math.min(modelReferenceLimit(selected), featureRule?.maxReferences ?? Infinity, capabilityMaxReferences ?? Infinity)
@@ -271,6 +281,8 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
       tracking.reportAssetGenerationSubmit(draft.modality, 'success', draft.references.length, Boolean(draft.target), studioContext);
     } catch (error) {
       tracking.reportAssetGenerationSubmit(draft.modality, 'failure', draft.references.length, Boolean(draft.target), studioContext);
+      const gate = detectMonetizationGateFromError(error as { status?: number; code?: string; message?: string });
+      if (gate) openMonetizationGate({ ...gate, pageName: trackingPage, ...(studioId ? { studioId } : {}) });
       if (mounted.current) onError((error as Error).message);
     } finally { if (mounted.current) setBusy(false); }
   };
@@ -368,24 +380,56 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
       {studio && gateway && !available.length && compatible.length > 0 && !unconfiguredPreferred && (imageWorkspace
         ? manageProvidersNotice
         : <Button variant="ghost" className="om-button h-auto" onClick={openModelSettings}>{t('Configure a provider or sign in to use media models.')}</Button>)}
-      {accountNotIncluded && <div className="om-creation-setup" role="status">
+      {accountNotIncluded && <div className="om-creation-setup" role="status" data-testid="studio-free-gate">
         <RemixIcon name="bank-card-line" size={20} />
         <p className="om-muted">{t('Signed in; multimodal generation requires OpenDesign Plus or above')}</p>
-        <Button variant="ghost" className="om-button h-auto" onClick={() => {
-          const entryId = tracking.newTrackingId();
-          setPendingAttribution('subscription', 'studio_free_gate', entryId);
-          send('ui_click', { page_name: trackingPage, area: 'asset_create', element: 'manage_subscription', hook_id: 'studio_free_gate', entry_id: entryId, ...(studioId ? { studio_id: studioId } : {}) });
-          (openSubscriptionSettings ?? openAccountSettings ?? openModelSettings)();
-        }}>
-          {t('Manage subscription')}
-        </Button>
+        <div className="om-control-row">
+          <a
+            className="om-button"
+            data-primary
+            href={campaignPricingUrl(locale, 'opengame_studio_free_gate', freeGateEntryId)}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => {
+              const clickedId = freeGateEntryId;
+              markFreeGateCheckoutReturn(clickedId);
+              send('ui_click', {
+                page_name: trackingPage,
+                area: 'asset_create',
+                element: 'open_pricing',
+                hook_id: 'studio_free_gate',
+                entry_id: clickedId,
+                ...(campaign ? { campaign_id: BLACK_FRIDAY_CAMPAIGN } : {}),
+                ...(studioId ? { studio_id: studioId } : {}),
+              });
+              window.setTimeout(() => setFreeGateEntryId(newCampaignEntryId()), 0);
+            }}
+          >
+            <RemixIcon name="sparkling-line" size={15} />
+            {campaign ? t('Upgrade · 50% OFF') : t('Upgrade to Plus')}
+            <RemixIcon name="external-link-line" size={14} />
+          </a>
+          <Button variant="ghost" className="om-button h-auto" onClick={() => {
+            const entryId = tracking.newTrackingId();
+            setPendingAttribution('subscription', 'studio_free_gate', entryId);
+            send('ui_click', { page_name: trackingPage, area: 'asset_create', element: 'manage_subscription', hook_id: 'studio_free_gate', entry_id: entryId, ...(studioId ? { studio_id: studioId } : {}) });
+            (openSubscriptionSettings ?? openAccountSettings ?? openModelSettings)();
+          }}>
+            {t('Manage subscription')}
+          </Button>
+        </div>
       </div>}
       {gateway && modelId && !selected && !unconfiguredPreferred && !openDesignMissing && <p className="om-muted" role="status">{scene && <strong>{gateway.models.find(model => model.id === modelId)?.label ?? modelId} · </strong>}{t('This task’s model is unavailable. Choose a model to continue.')}</p>}
   </>;
   const modelNotice = unknownReferences || cloudModelMissing ? <p className="om-muted" role="status">{unknownReferences && t('Image editing capability is unknown. Sync models to check reference support.')} <Button variant="ghost" className="om-button h-auto" disabled={syncing} onClick={() => void syncModels()}>{t(syncing ? 'Working…' : 'Sync models')}</Button></p> : selected && draft.references.length > 0 && <p className="om-muted">{t(maximumReferences ? draft.modality === 'video' ? 'This video model uses one image as its first frame.' : 'This model edits up to {count} image references.' : 'This model cannot use asset references. Choose an image model that supports editing, or remove the references.', { count: maximumReferences })}</p>;
   const generationSettings = parameterModel && <GenerationParameters key={parameterKey} model={parameterModel} draft={parameters}
     defaultValues={activeDefaultValues} appearance={formAppearance} popupClassName={formPopupClass}
-    hasInputImage={draft.references.length > 0} hidden={Object.keys(featureRule?.parameters ?? {})} onChange={value => {
+    hasInputImage={draft.references.length > 0} hidden={Object.keys(featureRule?.parameters ?? {})}
+    isLockedResolution={isLockedHighRes}
+    onLockedResolutionClick={(_val, labelText) => {
+      openResolutionGate({ resolutionLabel: labelText, pageName: trackingPage, ...(studioId ? { studioId } : {}) });
+    }}
+    onChange={value => {
       setParameterDrafts(current => ({ ...current, [parameterKey]: value }));
       try { setDraft({ ...draft, model: parameterModel.id, parameters: requestParameters(value, parameterModel, draft.references.length > 0, activeDefaultValues) }); }
       catch { /* Keep invalid JSON or conflicting parameters in the local editor until corrected. */ }

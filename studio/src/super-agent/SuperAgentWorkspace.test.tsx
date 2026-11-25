@@ -2618,7 +2618,7 @@ it('keeps multiplayer games playable in the catalog and only scaffolds single-pl
     await flush();
 
     // Verifies Game Studio hero, 6 genre strip buttons, top controls, and game market template cards
-    expect(container.querySelector('.om-sa-mode-hero-copy h2')?.textContent).toBe('Create a playable game in minutes');
+    expect(container.querySelector('.om-sa-mode-hero-copy h2')?.textContent).toBe('Build games. Turn play into pay.');
     expect(container.querySelector('.om-sa-mode-hero-copy p')).toBeNull();
     const genreCards = [...container.querySelectorAll('.om-sa-game-genre-card')];
     expect(genreCards.length).toBe(6);
@@ -2670,9 +2670,10 @@ it('keeps multiplayer games playable in the catalog and only scaffolds single-pl
     expect(topBar.textContent).toContain('Setting');
     expect(topBar.textContent).toContain('Screen layout');
     expect(topBar.textContent).not.toContain('Landscape');
-    const adSwitch = topBar.querySelector<HTMLElement>('[role="switch"][aria-label="Playable ad"]')!;
+    const adSwitch = topBar.querySelector<HTMLElement>('[role="switch"][aria-label="Ad-revenue game"]')!;
     const adSwitchLabel = adSwitch.closest('label')!;
-    expect(adSwitch.getAttribute('aria-checked')).toBe('false');
+    // New briefs start as a money-making mini game (playable ad) before any layout is picked.
+    expect(adSwitch.getAttribute('aria-checked')).toBe('true');
 
     // Open Art style popover and pick Pixel art
     const styleTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Art style')) as HTMLButtonElement;
@@ -2696,7 +2697,7 @@ it('keeps multiplayer games playable in the catalog and only scaffolds single-pl
     await flush();
     expect(topBar.textContent).toContain('Portrait');
     expect(orientationTrigger.hasAttribute('data-active')).toBe(true);
-    expect(adSwitch.getAttribute('aria-checked')).toBe('false');
+    expect(adSwitch.getAttribute('aria-checked')).toBe('true');
 
     // Select Landscape -> also highlighted as active; clicking Any screen layout clears back to unselected neutral state.
     const portraitTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('Portrait'))!;
@@ -2760,7 +2761,7 @@ it('keeps multiplayer games playable in the catalog and only scaffolds single-pl
       'Shooter',
       'Pixel art',
       '9:16',
-      'Playable ad',
+      'Ad-revenue game',
     ]);
   } finally {
     await act(async () => root.unmount());
@@ -3707,6 +3708,150 @@ it('forwards explicit composer parameter overrides when remixing a local built-i
   expect(turnBody?.contextTags?.map((tag: any) => tag.label)).toContain('Pixel art');
   expect(turnBody?.contextTags?.map((tag: any) => tag.label)).toContain('9:16');
   expect(turnBody?.contextTags?.map((tag: any) => tag.label)).toContain('Remix · Lantern Hop');
+});
+
+it('sends built-in template instant-delivery vs in-place-edit inference signals when remixing without custom overrides', async () => {
+  const REMIXED_GAME_ID = 'remixed-sky-lantern-as-is';
+  const localTemplate = {
+    id: 'local-sky-lantern-dash',
+    title: 'Sky Lantern Dash',
+    description: 'Bounce between glowing paper lanterns.',
+    controls: 'Tap or press Space to jump between lanterns.',
+    genre: 'platformer' as const,
+    style: '3d' as const,
+    setting: 'fantasy' as const,
+    orientation: 'landscape' as const,
+    multiplayer: false,
+    maxPlayers: 1,
+    status: 'published' as const,
+    cover: '/games/local-sky-lantern-dash/cover.png',
+    playUrl: '/motion-api/games/local-sky-lantern-dash/play/index.html',
+    plays: 120,
+    likes: 12,
+    dislikes: 0,
+    reaction: 0 as const,
+    favorite: false,
+    source: 'template' as const,
+    remixOf: null,
+    createdAt: '2026-11-20T00:00:00.000Z',
+    updatedAt: '2026-11-20T00:00:00.000Z',
+  };
+  let turnBody: any = null;
+  let remixRequestBody: any = null;
+  const createdChat: SuperAgentChat = {
+    id: CHAT_ID,
+    title: 'Remix · Sky Lantern Dash',
+    engine: 'codex',
+    model: 'gpt-5',
+    intent: 'game',
+    permissionMode: 'auto',
+    createdAt: 1000,
+    updatedAt: 1000,
+    state: 'idle',
+    messages: [],
+    artifacts: [],
+    approvals: [],
+  };
+
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method || 'GET').toUpperCase();
+    if (url.includes('/motion-api/super-agent/chats') && method === 'POST' && !url.includes('/turn')) {
+      return jsonResponse({ conversation: createdChat }, 201);
+    }
+    if (url.includes(`/motion-api/super-agent/chats/${CHAT_ID}/turn`) && method === 'POST') {
+      turnBody = JSON.parse(String(init?.body ?? '{}'));
+      return jsonResponse({ conversation: { ...createdChat, state: 'running' } });
+    }
+    if (url.includes(`/motion-api/super-agent/chats/${CHAT_ID}`)) return jsonResponse({ conversation: createdChat });
+    if (url.includes('/motion-api/super-agent/chats')) return jsonResponse({ conversations: [] });
+    if (url.includes('/motion-api/super-agent/resources')) {
+      return jsonResponse({ items: [], counts: { assets: 0, designProjects: 0, motionProjects: 0, brandKits: 0, templates: 0, skills: 0, total: 0 } });
+    }
+    if (url.includes('/settings/agents')) {
+      return jsonResponse({ agents: [{ id: 'codex', label: 'Codex', icon: 'codex', installed: true, auth: 'signed-in', models: [{ id: 'gpt-5', label: 'GPT-5', reasoning: ['medium'] }] }] });
+    }
+    if (url.includes('/agent-runtimes')) {
+      return jsonResponse({
+        localDirectAvailable: true,
+        runtimes: [{
+          id: 'local-direct',
+          kind: 'local-direct',
+          name: 'This computer',
+          status: 'online',
+          agents: [{ id: 'codex', label: 'Codex', icon: 'codex', installed: true, auth: 'signed-in', models: [] }],
+          runnableAgentIds: ['codex'],
+        }],
+      });
+    }
+    if (url.endsWith('/motion-api/games/local-sky-lantern-dash/remix') && method === 'POST') {
+      remixRequestBody = JSON.parse(String(init?.body ?? '{}'));
+      return jsonResponse({
+        game: {
+          ...localTemplate,
+          id: REMIXED_GAME_ID,
+          source: 'mine',
+          status: 'draft',
+          remixOf: localTemplate.id,
+          playUrl: `/motion-api/games/${REMIXED_GAME_ID}/play/index.html`,
+        },
+        agentInstruction: `This workspace game ${REMIXED_GAME_ID} is a remix game copied from a complete, playable built-in template.`,
+      });
+    }
+    if (url.includes('/motion-api/games')) return jsonResponse({ games: [localTemplate] });
+    return jsonResponse({});
+  });
+
+  try {
+    await act(async () => {
+      root.render(
+        <I18nProvider initialLocale="en">
+          <SuperAgentWorkspace
+            active
+            chatId={null}
+            requestedMode="game"
+            onChatIdChange={vi.fn()}
+            onOpenDesignProject={vi.fn()}
+            onOpenMotionProject={vi.fn()}
+            onOpenAsset={vi.fn()}
+            onOpenBrandKit={vi.fn()}
+            onOpenAgentSettings={vi.fn()}
+            onOpenMcp={vi.fn()}
+          />
+        </I18nProvider>,
+      );
+    });
+    await flush();
+    await flush();
+
+    const platformerTab = [...container.querySelectorAll<HTMLButtonElement>('.om-sa-showcase-tabs button')]
+      .find(tab => tab.textContent?.includes('Platformer'))!;
+    await act(async () => platformerTab.click());
+    await flush();
+
+    const localRemixBtn = container.querySelector<HTMLButtonElement>('.om-sa-game-tile-remix[aria-label="Remix: Sky Lantern Dash"]')!;
+    await act(async () => localRemixBtn.click());
+    await flush();
+
+    const sendBtn = container.querySelector<HTMLButtonElement>('.om-sa-send-btn')!;
+    await act(async () => sendBtn.click());
+    await flush();
+
+    expect(remixRequestBody).toEqual({});
+    expect(turnBody?.text).toBe('Remix · Sky Lantern Dash');
+    expect(turnBody?.hiddenInstructions).toContain('No template parameters were overridden.');
+    expect(turnBody?.hiddenInstructions).toContain('The user did not write custom modification text in this turn.');
+    expect(turnBody?.hiddenInstructions).toContain('Controls: Tap or press Space to jump between lanterns.');
+    expect(turnBody?.hiddenInstructions).toContain(`openmotion_game_set_status(id="${REMIXED_GAME_ID}", status="ready")`);
+    expect(turnBody?.hiddenInstructions).toContain(`openmotion_present_artifact(kind="game-project", projectId="${REMIXED_GAME_ID}", title="Sky Lantern Dash")`);
+    expect(turnBody?.hiddenInstructions).not.toContain('Proceed directly to building and testing');
+    expect(turnBody?.hiddenInstructions).not.toContain('Additional user notes:');
+  } finally {
+    globalThis.fetch = origFetch;
+  }
 });
 
 it('consumes Cloud deploy requests across viewer remounts and aborts deploy when opening a game fails', async () => {

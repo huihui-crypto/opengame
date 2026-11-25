@@ -1440,3 +1440,81 @@ it('drives relight and video feature prompts from runtime capability overrides a
   expect(container.querySelector('.om-source-actions')).toBeNull();
   expect(container.querySelector<HTMLButtonElement>('.om-creation-submit-button')?.disabled).toBe(true);
 });
+
+
+it('locks 2K/4K resolution choices for Plus account plans while leaving Pro unlocked', async () => {
+  const { mediaEditorDestination } = await import('./creativeStudios');
+  const { closeMonetizationGate, getMonetizationGateSnapshot } = await import('./monetization/monetizationGateBus');
+  closeMonetizationGate();
+  const hiResVideo: Model = {
+    id: 'account:demo-hi-res-video',
+    provider: 'account',
+    modelId: 'demo-hi-res-video',
+    label: 'Demo Hi-Res Video',
+    modality: 'video',
+    mode: 'text-to-video',
+    source: 'live',
+    generationOptions: {
+      fields: [
+        {
+          key: 'resolution',
+          label: 'Resolution',
+          kind: 'choice',
+          default: '1080p',
+          choices: [
+            { value: '1080p', label: '1080p' },
+            { value: '2k', label: '2K' },
+          ],
+        },
+      ],
+    },
+  };
+
+  const plusCatalog = {
+    models: [hiResVideo],
+    status: {
+      routes: { video: hiResVideo.id },
+      providers: [{ id: 'account', label: 'OpenDesign', available: true, plan: 'plus', mediaEntitlement: 'included' as const }],
+    },
+  };
+  await act(async () => root.render(<AssetComposer
+    {...props}
+    draft={{ modality: 'video', prompt: 'Ocean waves', model: hiResVideo.id, references: [] }}
+    studio={{
+      catalog: { catalog: plusCatalog, failed: false, retry: vi.fn() },
+      chooseModel: vi.fn(), remember: vi.fn(),
+      destination: mediaEditorDestination('video-camera-control'),
+    }}
+  />));
+
+  const resBtn = Array.from(container.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Resolution');
+  expect(resBtn).toBeTruthy();
+  await act(async () => resBtn!.click());
+  const locked2k = Array.from(document.querySelectorAll<HTMLButtonElement>('.om-option-pill')).find(b => b.textContent?.includes('2K'));
+  expect(locked2k?.dataset.locked).toBe('true');
+  await act(async () => locked2k!.click());
+  expect(getMonetizationGateSnapshot()).toMatchObject({ kind: 'resolution', resolutionLabel: '2K' });
+  closeMonetizationGate();
+  await act(async () => root.unmount()); root = createRoot(container);
+
+  const proCatalog = {
+    models: [hiResVideo],
+    status: {
+      routes: { video: hiResVideo.id },
+      providers: [{ id: 'account', label: 'OpenDesign', available: true, plan: 'pro', mediaEntitlement: 'included' as const }],
+    },
+  };
+  await act(async () => root.render(<AssetComposer
+    {...props}
+    draft={{ modality: 'video', prompt: 'Ocean waves', model: hiResVideo.id, references: [] }}
+    studio={{
+      catalog: { catalog: proCatalog, failed: false, retry: vi.fn() },
+      chooseModel: vi.fn(), remember: vi.fn(),
+      destination: mediaEditorDestination('video-camera-control'),
+    }}
+  />));
+  const proResBtn = Array.from(container.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Resolution');
+  await act(async () => proResBtn!.click());
+  const unlocked2k = Array.from(document.querySelectorAll<HTMLButtonElement>('.om-option-pill')).find(b => b.textContent?.includes('2K'));
+  expect(unlocked2k?.dataset.locked).toBeUndefined();
+});

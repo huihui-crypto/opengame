@@ -31,12 +31,12 @@
 
 # 认识 OpenGame
 
-OpenGame 是**首个开源全栈 Super Game Agent**——把你本地的编程 Agent 变成一座开源 AI 版虚幻引擎 / Unity 与完整游戏工作室，从一句话创意或爆款游戏模板出发，走完**制作 → 自动化试玩验证 → 一键在线分享 → 上架变现**的端到端全链路。
+OpenGame 是**首个开源全栈 Super Game Agent**——把 **DeepSeek（DSH）**、**Claude Code**、**Codex** 或任意本地编程 Agent 变成一座开源 AI 版虚幻引擎 / Unity 与全栈游戏工作台，从一句话创意出发，既能打造 **3A 级 3D 大作**，也能跑通 **爆款小游戏上架变现** 全链路。
 
-- 🎮 **一键复刻任何游戏。** 内置 **26 款可玩游戏模板**（3D、体素、像素、动漫及 9:16 爆款小游戏 / 试玩广告），源码与设计文档全部可编辑。
-- 🎨 **一键风格化任何游戏。** 保留成熟玩法骨架，快速替换角色、画风与配乐——**DeepSeek** 可低成本稳定换皮，**Claude Fable 5.2 / Opus / Codex / Gemini** 可从零打造 3D 大作。
-- 💰 **全链路闭环：制作 → 验证 → 发布变现。** 自动完成逻辑校验、仿真试玩、封面截图与实机预告片，一键生成在线链接或 9:16 试玩广告，并衔接小游戏上架路径。
-- 🔓 **全栈开源（BYOA + BYOK）。** 代码、美术、视频、音乐、配音与 Three.js 3D 全部开源；自带 [本地 Agent](#agent-wall) 与 API Key，或接入 [OpenDesign Go](https://go.open-design.ai/?utm_source=github&utm_medium=referral&utm_campaign=opengame&utm_content=readme_zh)。
+- 🚀 **用你的 Agent 打造 3A 级大作。** 直接用 **DeepSeek（DSH）**、**Claude**、**Codex**、**Gemini** 驱动代码、3D 场景、美术、配乐与配音全栈生产——从一句话想法到可玩的 3D 动作、竞速与大世界体验。
+- 🎮 **一键复刻 & 风格化任何游戏。** 内置 **25 款可玩游戏模板**（3D、体素、像素、动漫及 9:16 爆款小游戏 / 试玩广告），源码与设计文档全开放；保留成熟核心玩法，几分钟完成换皮与画风重构。
+- 💰 **做能赚钱的游戏：制作 → 验证 → 上架变现。** 自动完成规则校验、仿真试玩、封面截图与实机预告片；一键生成在线试玩链接或单文件 **9:16 试玩广告**，并打通 **微信小游戏 / 抖音 / TikTok** 等平台上架变现路径。
+- 🔓 **全栈开源（BYOA + BYOK）。** 代码、美术、视频、音乐、配音与 Three.js 3D 全部开源，支持接入你常用的 [本地 Agent](#agent-wall) 与自有 API Key，也可一键连接 [OpenDesign Go](https://go.open-design.ai/?utm_source=github&utm_medium=referral&utm_campaign=opengame&utm_content=readme_zh)（黑五期间享最低折扣，**DeepSeek V4.1 Flash**、**Seedream** 等模型免费用）。
 
 <a id="quick-start"></a> <a id="快速开始"></a>
 
@@ -82,7 +82,7 @@ npm start
 
 ## 🕹️ 内置可玩游戏模板与示例
 
-OpenGame 在 [`templates/games/`](../templates/games/) 中内置了 **26 款开箱即玩的完整游戏工程**，全部包含 HTML5 / Three.js 源码、封面、操控说明与中英双语元数据。在 Game Studio 里可直接试玩，一键 **Remix 复刻**，或**一键换画风 / 换题材 / 换角色**做成属于你的游戏。
+OpenGame 在 [`templates/games/`](../templates/games/) 中内置了 **25 款开箱即玩的完整游戏工程**，全部包含 HTML5 / Three.js 源码、封面、操控说明与中英双语元数据。在 Game Studio 里可直接试玩，一键 **Remix 复刻**，或**一键换画风 / 换题材 / 换角色**做成属于你的游戏。
 
 ### 3D、体素与动作游戏（16:9 横屏）
 
@@ -232,7 +232,7 @@ OpenGame 在 [`templates/games/`](../templates/games/) 中内置了 **26 款开�
 </table>
 
 <details>
-<summary><strong>展开查看全部 26 款内置可玩游戏模板</strong></summary>
+<summary><strong>展开查看全部 25 款内置可玩游戏模板</strong></summary>
 
 | 游戏名称 | 类型 | 画风 | 屏幕方向 | 简介 | 源码目录 |
 | --- | --- | --- | --- | --- | --- |
@@ -242,7 +242,6 @@ OpenGame 在 [`templates/games/`](../templates/games/) 中内置了 **26 款开�
 | **草原军团 (Gate Legion)** | 休闲 | 像素 | 9:16 竖屏 | 爆款算术门军团倍增与终点决战 | [gate-legion](../templates/games/gate-legion/) |
 | **符花庭园 (Glyph Garden)** | 休闲 | 动漫 | 16:9 横屏 | 奇幻月光花园三消连击解谜 | [glyph-garden](../templates/games/glyph-garden/) |
 | **海港突击 (Harbor Skirmish)** | 射击 | 3D | 16:9 横屏 | 手绘风格 3D 第一人称海岛射击，带滑铲与抓钩 | [harbor-skirmish](../templates/games/harbor-skirmish/) |
-| **空镇回声 (Hollow Signal)** | 恐怖 | 极简 | 16:9 横屏 | 在理智耗尽前穿越静电噪音锁定四段信号 | [hollow-signal](../templates/games/hollow-signal/) |
 | **景阳冈 (Jingyang Ridge)** | 休闲 | 动漫 | 16:9 横屏 | 水墨武松打虎 Boss 战：识破招式前摇、闪避反击 | [jingyang-ridge](../templates/games/jingyang-ridge/) |
 | **星港三线炮台 (Lane Turret)** | 射击 | 像素 | 9:16 竖屏 | 三线炮台瞄准射击、收集卡牌坚守十波 | [lane-turret](../templates/games/lane-turret/) |
 | **灯笼跳跃 (Lantern Hop)** | 平台 | 像素 | 16:9 横屏 | 像素狐狸月夜屋檐无尽二段跳跑酷 | [lantern-hop](../templates/games/lantern-hop/) |
@@ -448,7 +447,7 @@ OpenGame 通过本地 stdio MCP 暴露完整的游戏开发与测试工具集（
 | **游戏运行时与自动 QA** | Node.js, 原生 HTTP, Puppeteer Core / Chrome, 确定性仿真器 | [game-projects.ts](../game-projects.ts) · [shared/game-contract.ts](../shared/game-contract.ts) · [server.ts](../server.ts) |
 | **MCP 与游戏 Skill** | 本地 stdio MCP 服务、`openmotion-game` Skill 及 18 份手册 | [mcp.ts](../mcp.ts) · [skills/openmotion-game/](../skills/openmotion-game/) |
 | **多模态 Model Gateway** | BYOK 模型发现、异步任务轮询、素材库与在线分享发布 | [gateway/service.ts](../gateway/service.ts) · [gateway/catalog.ts](../gateway/catalog.ts) · [docs/assets.md](assets.md) |
-| **内置游戏模板库** | 26 款独立可玩 HTML5 / Canvas / Three.js 工程与封面 | [templates/games/](../templates/games/) |
+| **内置游戏模板库** | 25 款独立可玩 HTML5 / Canvas / Three.js 工程与封面 | [templates/games/](../templates/games/) |
 | **实机预告片管线** | 无头实机录屏 + HTML 合成 + FFmpeg MP4 渲染 | [docs/usage.md](usage.md) · [scripts/verify-export.ts](../scripts/verify-export.ts) |
 
 <a id="community"></a>

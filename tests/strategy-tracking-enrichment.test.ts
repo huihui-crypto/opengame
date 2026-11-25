@@ -65,11 +65,7 @@ test('P0-A: media generation worker events carry provider/model/capability/durat
     library: { title: 'Test poster' },
   }, codexHost);
   await gateway.tick();
-  for (let i = 0; i < 40; i++) {
-    const current = await gateway.getJob(job.id);
-    if (current.state === 'completed' || current.state === 'failed') break;
-    await new Promise(r => setTimeout(r, 20));
-  }
+  await Promise.all([...gateway.active.values()].map(task => task.done));
   await tracking.flush();
 
   const reqEv = events.find(e => e.event === 'media_generation_requested');
@@ -125,11 +121,7 @@ test('P0-A: media generation worker events carry provider/model/capability/durat
     library: { title: 'Fal poster' },
   }, codexHost);
   await falGateway.tick();
-  for (let i = 0; i < 40; i++) {
-    const current = await falGateway.getJob(falJob.id);
-    if (current.state === 'completed' || current.state === 'failed') break;
-    await new Promise(r => setTimeout(r, 20));
-  }
+  await Promise.all([...falGateway.active.values()].map(task => task.done));
   await tracking.flush();
   const falSub = events.find(e => e.event === 'media_generation_submitted' && e.properties.job_id === falJob.id);
   const falRes = events.find(e => e.event === 'media_generation_result' && e.properties.job_id === falJob.id);
@@ -174,11 +166,7 @@ test('P0-A: media generation worker events carry provider/model/capability/durat
     library: { title: 'Private' },
   });
   await failingGateway.tick();
-  for (let i = 0; i < 40; i++) {
-    const current = await failingGateway.getJob(customJob.id);
-    if (current.state === 'completed' || current.state === 'failed') break;
-    await new Promise(r => setTimeout(r, 20));
-  }
+  await Promise.all([...failingGateway.active.values()].map(task => task.done));
   await tracking.flush();
 
   const customSub = events.find(e => e.event === 'media_generation_submitted' && e.properties.job_id === customJob.id);

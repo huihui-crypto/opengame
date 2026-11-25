@@ -334,6 +334,170 @@ test('SuperAgentConversations runs Codex RPC dynamic tools, extracts artifacts, 
   await service.close();
 }));
 
+test('SuperAgentConversations resolves local Codex Default and compatibility from the same catalog before a single turn', async t => {
+  const requestedModel = 'gpt-6.2-astra';
+  const compatibleModel = {
+    id: 'gpt-6.1-terra',
+    model: 'gpt-6.1-terra',
+    isDefault: true,
+    defaultReasoningEffort: 'medium',
+    supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'medium' }],
+  };
+  const hiddenModel = { id: 'gpt-5.4-hidden', model: 'gpt-5.4-hidden', hidden: true, isDefault: true };
+  const newerModel = { id: 'gpt-6.2-sol', model: 'gpt-6.2-sol', isDefault: true };
+  const firstVisibleModel = { id: 'gpt-5.4', model: 'gpt-5.4' };
+  type CatalogEntry = typeof compatibleModel | typeof hiddenModel | typeof newerModel | typeof firstVisibleModel;
+  const cases: Array<{
+    name: string;
+    version: string;
+    provider?: string;
+    userModel?: string;
+    userEffort?: string;
+    catalog?: CatalogEntry[][] | 'unavailable';
+    resume?: boolean;
+    expectedThreadModel?: string;
+    expectedTurnModel?: string;
+    expectedEffort?: string | null;
+  }> = [
+    {
+      name: 'old CLI Default prefers a visible catalog default on a later page',
+      version: '0.163.0', catalog: [[hiddenModel, firstVisibleModel], [compatibleModel]],
+      expectedThreadModel: compatibleModel.model, expectedTurnModel: compatibleModel.model,
+    },
+    {
+      name: 'newer CLI Default uses its advertised GPT-6.2 default',
+      version: '0.169.1', catalog: [[firstVisibleModel], [newerModel]],
+      expectedThreadModel: newerModel.model, expectedTurnModel: newerModel.model,
+    },
+    {
+      name: 'Default on a resumed newer thread uses the first visible model when no default is advertised',
+      version: '0.169.1', catalog: [[hiddenModel, firstVisibleModel], [{ id: 'gpt-6.1-terra', model: 'gpt-6.1-terra' }]],
+      resume: true, expectedThreadModel: firstVisibleModel.model, expectedTurnModel: firstVisibleModel.model,
+    },
+    {
+      name: 'Default with an empty catalog lets Codex choose its own model',
+      version: '0.169.1', catalog: [[]], expectedEffort: null,
+    },
+    {
+      name: 'Default with an unavailable catalog lets Codex choose its own model',
+      version: '0.169.1', catalog: 'unavailable', expectedEffort: null,
+    },
+    {
+      name: 'old CLI with an explicit model falls back from an unsupported reasoning effort',
+      version: '0.163.0', userModel: requestedModel, userEffort: 'xhigh',
+      catalog: [[hiddenModel, firstVisibleModel], [compatibleModel]], expectedThreadModel: requestedModel,
+      expectedTurnModel: compatibleModel.model, expectedEffort: 'medium',
+    },
+    {
+      name: 'compatible CLI keeps the explicitly selected model and effort',
+      version: '0.169.1', userModel: requestedModel, userEffort: 'high',
+      expectedThreadModel: requestedModel, expectedTurnModel: requestedModel, expectedEffort: 'high',
+    },
+    {
+      name: 'old CLI without a compatible visible model keeps the requested model',
+      version: '0.163.0', userModel: requestedModel, userEffort: 'high', catalog: [[hiddenModel, newerModel]],
+      expectedThreadModel: requestedModel, expectedTurnModel: requestedModel, expectedEffort: 'high',
+    },
+    {
+      name: 'old CLI for a custom provider keeps the requested model',
+      version: '0.163.0', provider: 'custom', userModel: requestedModel, userEffort: 'high',
+      expectedThreadModel: requestedModel, expectedTurnModel: requestedModel, expectedEffort: 'high',
+    },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, () => fixture(async store => {
+      const cursors: Array<string | undefined> = [];
+      const requests: Array<{ method: string; params: { model?: string; effort?: string | null; cursor?: string; threadId?: string } }> = [];
+      let connections = 0;
+
+      class CompatibilityRpc {
+        private readonly notify: (message: unknown) => void;
+
+        constructor(_bin: string, _cwd: string, notify: (message: unknown) => void) {
+          this.notify = notify;
+          connections += 1;
+        }
+
+        async request(method: string, params: typeof requests[number]['params'] = {}) {
+          requests.push({ method, params });
+          if (method === 'initialize') return { userAgent: `Codex Desktop/${scenario.version}` };
+          if (method === 'thread/start' || method === 'thread/resume') {
+            if (method === 'thread/resume') assert.equal(params.threadId, 'codex-game-thread');
+            return {
+              thread: { id: 'codex-game-thread' },
+              model: params.model ?? requestedModel,
+              modelProvider: scenario.provider ?? 'openai',
+            };
+          }
+          if (method === 'model/list') {
+            cursors.push(params.cursor);
+            const { catalog } = scenario;
+            if (!catalog || catalog === 'unavailable') throw new Error('Codex model catalog is unavailable');
+            const page = params.cursor ? Number(params.cursor) : 0;
+            return { data: catalog[page], nextCursor: page + 1 < catalog.length ? String(page + 1) : null };
+          }
+          if (method === 'turn/start') {
+            const turn = { id: 'codex-game-turn', status: 'completed' };
+            queueMicrotask(() => this.notify({ method: 'turn/completed', params: { turn } }));
+            return { turn };
+          }
+          throw new Error(`Unexpected Codex RPC method ${method}`);
+        }
+
+        send() {}
+        close() {}
+      }
+
+      const service = new SuperAgentConversations(store, {
+        resolve: async () => '/fake/codex',
+        rpc: CompatibilityRpc as unknown as typeof AssetAgentRpc,
+      });
+      try {
+        const chat = await service.create({ engine: 'codex', model: scenario.userModel });
+        const runtime = { origin: 'http://127.0.0.1:4120', phase1: () => ({} as Phase1Service) };
+        if (scenario.resume) {
+          await service.start(chat.id, {
+            requestId: 'req-codex-previous-turn', text: 'Plan a local racing game', mode: 'game', model: requestedModel,
+          }, runtime);
+          const previous = await service.waitForChat(chat.id);
+          assert.equal(previous.state, 'idle', previous.error);
+          assert.equal(previous.model, requestedModel);
+          requests.length = 0;
+          cursors.length = 0;
+          connections = 0;
+        }
+        await service.start(chat.id, {
+          requestId: 'req-codex-model-compatibility',
+          text: 'Build a local racing game',
+          mode: 'game',
+          ...(scenario.resume ? { model: 'default' } : {}),
+          ...(scenario.userEffort ? { reasoning: scenario.userEffort } : {}),
+        }, runtime);
+        const done = await service.waitForChat(chat.id);
+        assert.equal(done.state, 'idle', done.error);
+        assert.equal(done.model, scenario.userModel);
+        assert.equal(done.reasoning, scenario.userEffort);
+        assert.equal(done.messages.filter(message => message.role === 'user').length, scenario.resume ? 2 : 1);
+        assert.equal(connections, 1);
+        const pageCount = scenario.catalog === 'unavailable' ? 1 : scenario.catalog?.length ?? 0;
+        assert.deepEqual(cursors, Array.from({ length: pageCount }, (_, index) => index ? String(index) : undefined));
+        const discovery = cursors.map(() => 'model/list');
+        const threadMethod = scenario.resume ? 'thread/resume' : 'thread/start';
+        const setup = scenario.userModel ? [threadMethod, ...discovery] : [...discovery, threadMethod];
+        assert.deepEqual(requests.map(request => request.method), ['initialize', ...setup, 'turn/start']);
+        const thread = requests.find(request => request.method === threadMethod)!.params;
+        const turn = requests.at(-1)!.params;
+        assert.equal(thread.model, scenario.expectedThreadModel);
+        assert.equal(turn.model, scenario.expectedTurnModel);
+        if (scenario.expectedEffort !== undefined) assert.equal(turn.effort, scenario.expectedEffort);
+      } finally {
+        await service.close();
+      }
+    }));
+  }
+});
+
 test('SuperAgentConversations runs Claude Code stream-json turns and extracts artifacts', () => fixture(async store => {
   const phase1 = new Phase1Service(store, pluginRoot, {
     origin: () => 'http://127.0.0.1:4173',
@@ -1136,6 +1300,101 @@ test('game generation suppresses premature starter-kit artifacts during building
   assert.ok(autoPresented);
   assert.ok((autoPresented.presentedAt ?? 0) > 0);
   await serviceB.close();
+}));
+
+test('built-in template zero-rebuild delivery presents game artifact immediately and preserves localized title across concurrent set_status', () => fixture(async store => {
+  const games = gameProjectsFor(store.directory);
+  const remixed = await games.remix('ball-match');
+  assert.equal(remixed.game.title, 'Jelly Ball Chain Pop');
+  assert.equal(remixed.game.status, 'draft');
+
+  const phase1 = {
+    call: async (name: string, args: Record<string, unknown>) => {
+      if (name === 'openmotion_game_set_status') {
+        return games.status(String(args.id), args.status);
+      }
+      throw new Error(`Unexpected tool in zero-rebuild delivery: ${name}`);
+    },
+  } as unknown as Phase1Service;
+
+  const toolCalls: string[] = [];
+  class InstantTemplateDeliveryRpc {
+    onNotification: (msg: any) => void;
+    constructor(_bin: string, _cwd: string, onNotification: (msg: any) => void) {
+      this.onNotification = onNotification;
+    }
+    async request(method: string) {
+      if (method === 'initialize') return { serverInfo: { name: 'mock-codex' } };
+      if (method === 'thread/start') return { thread: { id: 'thread-instant-template' } };
+      if (method === 'turn/start') {
+        setTimeout(() => {
+          // Present with localized title first, then transition status to ready — title must not be clobbered back to English.
+          this.onNotification({
+            id: 401,
+            method: 'item/tool/call',
+            params: {
+              callId: 'tpl-1',
+              tool: 'openmotion_present_artifact',
+              arguments: { kind: 'game-project', projectId: remixed.game.id, title: '弹珠连线爆爆乐' },
+            },
+          });
+        }, 5);
+        return { turn: { id: 'turn-instant-template' } };
+      }
+      return {};
+    }
+    send(payload: any) {
+      if (payload.id === 401) {
+        toolCalls.push('present_artifact');
+        this.onNotification({
+          id: 402,
+          method: 'item/tool/call',
+          params: {
+            callId: 'tpl-2',
+            tool: 'openmotion_game_set_status',
+            arguments: { id: remixed.game.id, status: 'ready' },
+          },
+        });
+      } else if (payload.id === 402) {
+        toolCalls.push('set_status');
+        this.onNotification({
+          method: 'turn/completed',
+          params: { turn: { id: 'turn-instant-template', status: 'completed' } },
+        });
+      }
+    }
+    close() {}
+  }
+
+  const service = new SuperAgentConversations(store, {
+    resolve: async () => '/usr/local/bin/codex',
+    rpc: InstantTemplateDeliveryRpc as unknown as typeof AssetAgentRpc,
+  });
+  const chat = await service.create({ engine: 'codex', intent: 'game', permissionMode: 'auto' });
+  await service.start(chat.id, {
+    requestId: 'req-instant-tpl',
+    mode: 'game',
+    text: '做同款 · 弹珠连线爆爆乐',
+  }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => phase1,
+  });
+
+  for (let i = 0; i < 80; i++) {
+    const snap = await service.get(chat.id);
+    if (snap.state === 'idle' || snap.state === 'failed') break;
+    await new Promise(resolve => setTimeout(resolve, 15));
+  }
+
+  const done = await service.get(chat.id);
+  assert.equal(done.state, 'idle');
+  assert.deepEqual(toolCalls, ['present_artifact', 'set_status']);
+  assert.equal((await games.get(remixed.game.id)).status, 'ready');
+  assert.equal(done.activeArtifactId, `game:${remixed.game.id}`);
+  const art = done.artifacts.find(item => item.id === `game:${remixed.game.id}`);
+  assert.ok(art);
+  assert.equal(art.title, '弹珠连线爆爆乐');
+  await service.close();
 }));
 
 test('extractLocalDevServerUrl, annotation image persistence, and lean Coding prompt injection', () => fixture(async store => {
@@ -2072,6 +2331,14 @@ test('Codex and Claude Super Agent prompts share unified gameAssetInstructions w
     assert.ok(prompt.includes(gameAssetInstructions), 'Super Agent prompt must embed gameAssetInstructions');
     assert.doesNotMatch(prompt, /optionally generate visual/i);
     assert.doesNotMatch(prompt, /openmotion_generate_asset/);
+    assert.doesNotMatch(prompt, /keep game assets inline in index\.html/i);
+    assert.doesNotMatch(prompt, /Game Studio no-nag boundary/);
+    assert.match(prompt, /including Game Studio multimodal-first builds[\s\S]*MUST call openmotion_open_preview/);
+    assert.match(prompt, /requires subscribing to OpenDesign Plus/);
+    assert.match(prompt, /Built-in template remix fast path/);
+    assert.match(prompt, /deliver immediately with zero rebuild/);
+    assert.match(prompt, /never say you copied a template/i);
+    assert.match(prompt, /edit the existing files in place/);
   }
 });
 
@@ -3012,6 +3279,25 @@ test('extractActionCardFromTool maps provider handoffs, low-balance failures, an
     extractActionCardFromTool('openmotion_open_preview', { target: 'templates' }, {}, true),
     undefined,
   );
+  // Silent capability discovery (inspect with settingsHandoff) must never auto-pop a sign-in or upgrade card
+  assert.equal(
+    extractActionCardFromTool(
+      'openmotion_media_use',
+      { action: 'inspect', modality: 'audio' },
+      { settingsHandoff: { tool: 'openmotion_open_preview', arguments: { target: 'providers', entry: 'agent_media_signed_out' } } },
+      true,
+    ),
+    undefined,
+  );
+  assert.equal(
+    extractActionCardFromTool(
+      'openmotion_media_use',
+      { action: 'inspect', modality: 'audio' },
+      { settingsHandoff: { tool: 'openmotion_open_preview', arguments: { target: 'providers', entry: 'agent_media_upgrade_free' } } },
+      true,
+    ),
+    undefined,
+  );
 
   // Reactive Plus low-balance failure from failed OpenDesign account generation job (direct AND MCP structuredContent envelope)
   assert.deepEqual(
@@ -3146,3 +3432,102 @@ test('extractActionCardFromTool maps provider handoffs, low-balance failures, an
   assert.equal(isProviderSettingsWebArtifactUrl('https://example.com/settings/providers', ownOrigin), false);
   assert.equal(isProviderSettingsWebArtifactUrl('http://127.0.0.1:4120/games/demo', ownOrigin), false);
 });
+
+test('Super Agent always gates billed media generation approvals even in default auto permissionMode until Always allow is granted for generation', () => fixture(async store => {
+  const { readFile } = await import('node:fs/promises');
+  let generationCalls = 0;
+  const phase1 = {
+    call: async (name: string, args: any) => {
+      if (name === 'openmotion_assets_use' && args.action === 'generate') {
+        generationCalls += 1;
+        return { job: { id: `job-auto-gate-${generationCalls}`, state: 'queued', model: { id: args.model || 'account:elevenlabs-music-v2' } } };
+      }
+      return {};
+    },
+  } as unknown as Phase1Service;
+
+  let firstApprovalObserved = false;
+  let secondApprovalObserved = false;
+  const service = new SuperAgentConversations(store, {
+    resolveAgent: async () => '/usr/local/bin/claude',
+    runClaude: async ({ mcpConfigPath, onEvent }) => {
+      const cfg = JSON.parse(await readFile(mcpConfigPath, 'utf8'));
+      const server = cfg.mcpServers.openmotion;
+      const callGen = (id: number, model: string, modality: string, prompt: string) =>
+        fetch(server.url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...server.headers },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id,
+            method: 'tools/call',
+            params: { name: 'openmotion_assets_use', arguments: { action: 'generate', model, modality, prompt } },
+          }),
+        });
+
+      // 1) First billed call in default auto mode MUST still wait for user approval
+      const firstPromise = callGen(11, 'account:elevenlabs-music-v2', 'audio', 'playful farmyard loop');
+      for (let i = 0; i < 60; i++) {
+        const current = await service.get(chat.id);
+        if (current.approvals.length > 0) {
+          firstApprovalObserved = true;
+          assert.equal(current.state, 'waiting');
+          assert.equal(current.approvals[0].kind, 'generation');
+          assert.equal(generationCalls, 0);
+          // Approve once (alwaysAllow=false)
+          await service.answer(chat.id, current.approvals[0].id, true, false);
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 15));
+      }
+      const firstBody = await (await firstPromise).json() as any;
+      assert.equal(firstBody.result.isError, false);
+      assert.equal(generationCalls, 1);
+
+      // 2) Second billed call MUST still gate until user grants alwaysAllow=true on generation
+      const secondPromise = callGen(12, 'account:gpt-image-2', 'image', 'farmyard backdrop');
+      for (let i = 0; i < 60; i++) {
+        const current = await service.get(chat.id);
+        if (current.approvals.length > 0) {
+          secondApprovalObserved = true;
+          assert.equal(current.approvals[0].kind, 'generation');
+          assert.equal(generationCalls, 1);
+          await service.answer(chat.id, current.approvals[0].id, true, true);
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 15));
+      }
+      const secondBody = await (await secondPromise).json() as any;
+      assert.equal(secondBody.result.isError, false);
+      assert.equal(generationCalls, 2);
+
+      // 3) Third billed call after generation alwaysAllow=true proceeds immediately without waiting
+      const thirdBody = await (await callGen(13, 'account:gpt-image-2', 'image', 'golden goose icon')).json() as any;
+      assert.equal(thirdBody.result.isError, false);
+      assert.equal(generationCalls, 3);
+
+      await onEvent({ type: 'assistant', message: { content: [{ type: 'text', text: 'All assets generated.' }] } });
+    },
+  });
+
+  // Default create() uses permissionMode: 'auto'
+  const chat = await service.create({ engine: 'claude' });
+  assert.equal(chat.permissionMode, 'auto');
+  await service.start(chat.id, { requestId: 'req-auto-gen-gate-1', text: 'Make a goose game' }, {
+    origin: 'http://127.0.0.1:4173',
+    phase1: () => phase1,
+  });
+
+  for (let i = 0; i < 100; i++) {
+    const snap = await service.get(chat.id);
+    if (snap.state === 'idle' || snap.state === 'failed') break;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  const done = await service.get(chat.id);
+  assert.equal(firstApprovalObserved, true);
+  assert.equal(secondApprovalObserved, true);
+  assert.equal(generationCalls, 3);
+  assert.equal(done.generationAutoApproved, true);
+  assert.equal(done.state, 'idle');
+  await service.close();
+}));

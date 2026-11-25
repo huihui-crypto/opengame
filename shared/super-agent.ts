@@ -208,7 +208,7 @@ export type SuperAgentArtifact = {
 
 export function isPlayableAdArtifact(item: Pick<SuperAgentArtifact | SuperAgentResourceAttachment, 'kind' | 'playableAd' | 'subtitle'>): boolean {
   return item.kind === 'game-project'
-    && (item.playableAd ?? /(?:^|·)\s*(?:Playable ad|广告游戏)\s*$/i.test(item.subtitle ?? ''));
+    && (item.playableAd ?? /(?:^|·)\s*(?:Playable ad|广告游戏|赚钱小游戏)\s*$/i.test(item.subtitle ?? ''));
 }
 
 export type SuperAgentToolCategory =
@@ -418,6 +418,8 @@ export type SuperAgentChat = {
   model?: string;
   reasoning?: string;
   permissionMode: SuperAgentPermissionMode;
+  /** True only after the user explicitly chooses Always allow on a billed generation approval in this chat. */
+  generationAutoApproved?: boolean;
   threadId?: string;
   /** Names of the tools the Agent thread was started with; a thread cannot pick up tools added later. */
   threadTools?: string;
