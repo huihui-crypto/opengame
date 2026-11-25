@@ -2034,21 +2034,34 @@ export function ArtifactBrowserPane({
     void webRef.current?.command('set-touch', touch).catch(() => {});
   }, [activeArtifact?.kind, activeArtifact?.id, webDevicePreset]);
 
+  // Bundled and community templates are play-and-remix previews: the editing tools
+  // (view mode, annotate, viewport, screenshot, console) only apply to the user's own games.
+  // External community games have no projectId; their reported source can be reset to null when the
+  // artifact switches, so treat any non-own game without a project as a template too.
+  const isTemplateGame = activeArtifact?.kind === 'game-project'
+    && (gameSourceKind === 'template' || gameSourceKind === 'community'
+      || (!activeArtifact.projectId && gameSourceKind !== 'mine'));
+
+  // A template has no code view; if its source resolves while Code is open, return to Preview.
+  useEffect(() => {
+    if (isTemplateGame && viewMode !== 'preview') setViewMode('preview');
+  }, [isTemplateGame, viewMode]);
   const supportsAnnotate = Boolean(
     activeArtifact && (
       activeArtifact.kind === 'web'
       || (activeArtifact.kind === 'design-project' && (viewMode === 'preview' || !activeArtifact.projectId))
-      || (activeArtifact.kind === 'game-project' && Boolean(activeArtifact.projectId) && viewMode === 'preview')
+      || (activeArtifact.kind === 'game-project' && Boolean(activeArtifact.projectId) && !isTemplateGame && viewMode === 'preview')
     ),
   );
+  // Templates keep the viewport presets so players can try phone and tablet sizes.
+  const showViewportMenu = supportsAnnotate || (isTemplateGame && viewMode === 'preview');
   const canCaptureScreenshot = supportsAnnotate && Boolean(onAttachBrowserAnnotation);
   const isMultiplayerGame = Boolean(activeArtifact?.kind === 'game-project' && (
     activeArtifact.id === multiplayerArtifactId || isMultiplayerGameArtifact(activeArtifact)
   ));
   const toolbarGameAction = !showNewTab
     && activeArtifact?.kind === 'game-project'
-    && !activeArtifact.projectId
-    && gameSourceKind !== 'mine'
+    && (isTemplateGame || (!activeArtifact.projectId && gameSourceKind !== 'mine'))
     && !isMultiplayerGame
     ? onUseGameInAgent
     : undefined;
@@ -2594,7 +2607,8 @@ export function ArtifactBrowserPane({
 
         <div className="om-sa-context-actions">
           {(() => {
-            const hasModeSwitch = activeArtifact?.kind === 'design-project' || (activeArtifact?.kind === 'game-project' && Boolean(activeArtifact.projectId));
+            const hasModeSwitch = activeArtifact?.kind === 'design-project'
+              || (activeArtifact?.kind === 'game-project' && Boolean(activeArtifact.projectId) && !isTemplateGame);
             const gamePublishId = activeArtifact?.kind === 'game-project'
               ? (activeArtifact.projectId || (activeArtifact.id.startsWith('game:') ? activeArtifact.id.slice('game:'.length) : ''))
               : '';
@@ -2679,8 +2693,9 @@ export function ArtifactBrowserPane({
                   <span className="om-sa-toolbar-divider" aria-hidden="true" />
                 )}
 
-                {supportsAnnotate && (
+                {showViewportMenu && (
                   <div className="om-sa-tool-group">
+                    {supportsAnnotate && (
                     <Tooltip label={t('Annotate elements, regions, and drawings')}>
                       <IconButton
                         variant="ghost"
@@ -2698,6 +2713,7 @@ export function ArtifactBrowserPane({
                         icon={<RemixIcon name="focus-3-line" size={15} />}
                       />
                     </Tooltip>
+                    )}
 
                     <Popover
                       open={deviceMenuOpen}
@@ -2822,7 +2838,7 @@ export function ArtifactBrowserPane({
                       </Tooltip>
                     )}
 
-                    {(webErrorCount > 0 || consoleOpen) && (
+                    {supportsAnnotate && (webErrorCount > 0 || consoleOpen) && (
                       <Tooltip label={t('Console & errors')}>
                         <Button
                           variant="ghost"
@@ -2844,7 +2860,7 @@ export function ArtifactBrowserPane({
 
                 {toolbarGameAction && activeArtifact && (
                   <>
-                    {(hasModeSwitch || supportsAnnotate) && (
+                    {(hasModeSwitch || showViewportMenu) && (
                       <span className="om-sa-toolbar-divider" aria-hidden="true" />
                     )}
                     <Tooltip label={t('Remix')}>
@@ -2914,7 +2930,7 @@ export function ArtifactBrowserPane({
                   </div>
                 )}
 
-                {canCloudShare && (hasModeSwitch || supportsAnnotate || toolbarGameAction || (activeArtifact?.kind === 'motion-project' && Boolean(activeArtifact.projectId))) && (
+                {canCloudShare && (hasModeSwitch || showViewportMenu || toolbarGameAction || (activeArtifact?.kind === 'motion-project' && Boolean(activeArtifact.projectId))) && (
                   <span className="om-sa-toolbar-divider" aria-hidden="true" />
                 )}
 
@@ -3065,11 +3081,14 @@ export function ArtifactBrowserPane({
 
                 {activeArtifact.kind !== 'web' && (
                   <>
-                    {(supportsAnnotate || externalHref || downloadHref) && (
+                    {(supportsAnnotate || externalHref || downloadHref)
+                      // Games only have "Open in Game Studio" below; skip the separator when it is absent.
+                      && (activeArtifact.kind !== 'game-project' || Boolean(activeArtifact.projectId && onOpenInGameStudio)) && (
                       <div role="separator" />
                     )}
 
-                    {!toolbarGameAction && !isMultiplayerGame && ['design-project', 'motion-project', 'game-project', 'asset-image', 'asset-video', 'asset-audio', 'brand-kit'].includes(activeArtifact.kind) && (
+                    {/* Games: templates use the toolbar Remix button; the user's own games need no Attach entry. */}
+                    {['design-project', 'motion-project', 'asset-image', 'asset-video', 'asset-audio', 'brand-kit'].includes(activeArtifact.kind) && (
                       <Button
                         variant="plain"
                         type="button"
@@ -3077,15 +3096,11 @@ export function ArtifactBrowserPane({
                         className="om-sa-browser-menu-item"
                         onClick={() => {
                           setBrowserMenuOpen(false);
-                          if (activeArtifact.kind === 'game-project' && onUseGameInAgent) {
-                            onUseGameInAgent(activeArtifact);
-                          } else {
-                            onAttachArtifact(activeArtifact);
-                          }
+                          onAttachArtifact(activeArtifact);
                         }}
                       >
-                        <RemixIcon name={activeArtifact.kind === 'game-project' && gameSourceKind !== 'mine' ? 'sparkling-line' : 'add-line'} size={14} />
-                        <span>{activeArtifact.kind === 'game-project' && gameSourceKind !== 'mine' ? t('Remix') : t('Attach')}</span>
+                        <RemixIcon name="add-line" size={14} />
+                        <span>{t('Attach')}</span>
                       </Button>
                     )}
 
